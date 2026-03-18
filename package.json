@@ -118,7 +118,7 @@
     "shpjs": "^6.2.0",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
-    "tailwind-merge": "^3.4.0",
+    "tailwind-merge": "^3.5.0",
     "tailwindcss-animate": "^1.0.7",
     "uuid": "^13.0.0",
     "vite-plugin-cesium": "^1.2.23",
