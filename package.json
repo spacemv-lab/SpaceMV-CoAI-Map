@@ -123,6 +123,6 @@
     "uuid": "^13.0.0",
     "vite-plugin-cesium": "^1.2.23",
     "xlsx": "^0.18.5",
-    "zustand": "^5.0.11"
+    "zustand": "^5.0.12"
   }
 }
