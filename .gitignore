@@ -1,0 +1,75 @@
+# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
+
+# compiled output
+dist
+tmp
+out-tsc
+
+# dependencies
+node_modules
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# misc
+/.sass-cache
+/connect.lock
+/coverage
+/libpeerconnection.log
+npm-debug.log
+yarn-error.log
+testem.log
+/typings
+
+# System Files
+.DS_Store
+Thumbs.db
+
+.nx/cache
+.nx/workspace-data
+
+vite.config.*.timestamp*
+vitest.config.*.timestamp*
+
+libs/utiles/log-evaluation/data/
+
+# runtime uploads
+uploads/*
+!uploads/.gitkeep
+
+# kubernetes secrets
+deploy/k8s/**/secret.yaml
+
+# environment files (keep secrets out of git)
+# 旧的环境文件规则（已重构为 .envs/map-ai/*/ 结构）
+# .env
+# .env.*
+# .envs/*.env
+# !.envs/*.env.example
+
+# 新的环境文件规则 - 所有 .env 文件忽略，.env.example 例外
+.envs/*/*.env
+!.envs/*/*.env.example
+
+# agent 环境文件（兼容旧结构）
+apps/**/.env
+!apps/**/.env.example
+
+# docker compose uploads
+.dockerdata/
+
+# local MinIO data
+miniodata/

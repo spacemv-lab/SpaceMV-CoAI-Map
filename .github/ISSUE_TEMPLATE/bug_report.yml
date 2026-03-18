@@ -1,0 +1,64 @@
+---
+name: Bug 报告
+description: 报告一个 Bug 以帮助我们改进
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢您在百忙之中抽出时间报告 Bug！请提供尽可能多的详细信息以帮助我们复现问题。
+
+        **⚠️ 请勿在此处填写任何敏感信息（密码、密钥、内网 IP 等）**
+  - type: input
+    id: description
+    attributes:
+      label: Bug 描述
+      description: 请简要描述 Bug 现象
+      placeholder: 例如：点击上传按钮后页面无响应
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 请提供详细的复现步骤
+      placeholder: |
+        1. 打开页面...
+        2. 点击...
+        3. 输入...
+        4. 出现错误
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+      description: 您期望发生什么？
+      placeholder: 例如：文件应该开始上传并显示进度条
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 实际发生了什么？
+      placeholder: 例如：页面无响应，控制台报错...
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 环境信息
+      placeholder: |
+        - OS: Windows 11 / macOS 14 / Ubuntu 22.04
+        - 浏览器：Chrome 120 / Firefox 121
+        - Node.js: v20.10.0
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志/截图
+      description: 请提供控制台日志或错误截图（如有）
+      render: shell

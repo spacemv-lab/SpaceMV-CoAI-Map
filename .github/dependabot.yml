@@ -1,0 +1,54 @@
+# Dependabot 配置文件
+# 文档：https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+
+version: 2
+updates:
+  # npm/pnpm 依赖更新
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "chore(deps)"
+    reviewers:
+      - "maintainers"
+    ignore:
+      # 忽略大版本更新，需要手动评估
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Python 依赖更新
+  - package-ecosystem: "pip"
+    directory: "/apps/map-ai/agent"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "chore(deps)"
+
+  # GitHub Actions 更新
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Shanghai"
+    labels:
+      - "ci/cd"
+      - "dependencies"
+    commit-message:
+      prefix: "chore(ci)"

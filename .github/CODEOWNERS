@@ -1,0 +1,28 @@
+# Code Owners
+# 此文件定义了谁负责仓库中的哪些代码路径
+# GitHub 会自动将这些人添加为 Pull Request 的 Reviewer
+
+# 默认所有者 (架构师或 Tech Lead)
+*       @tech-lead
+
+# 前端领域
+# 所有 frontend 目录下的修改，都需要 @frontend-lead 审核
+frontend/           @frontend-lead
+frontend/libs/      @frontend-architect
+
+# 后端领域
+backend/            @backend-lead
+backend/libs/db-client/  @db-admin
+
+# 智能体领域
+agents/             @ai-researcher
+agents/libs/geo-core/    @gis-expert
+
+# 全局共享契约
+# 修改契约通常意味着接口变更，需要前后端负责人同时审核
+shared/contracts/   @frontend-lead @backend-lead
+
+# 配置文件
+# CI/CD 或 Nx 配置修改需要 DevOps 审核
+nx.json             @devops
+.github/            @devops

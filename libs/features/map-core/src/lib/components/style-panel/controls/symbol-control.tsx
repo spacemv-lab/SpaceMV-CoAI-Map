@@ -1,0 +1,31 @@
+/**
+ * Copyright (c) 2026 成都天巡微小卫星科技有限责任公司
+ * This project is licensed under the MIT License - see the LICENSE file in the project root for details.
+ */
+
+
+import { POINT_SYMBOL_OPTIONS } from '../../../constants/style-config';
+
+interface SymbolControlProps {
+  value: string;
+  onChange: (symbol: string) => void;
+}
+
+export function SymbolControl({ value, onChange }: SymbolControlProps) {
+  return (
+    <div>
+      <label className="text-sm text-gray-600 block mb-1">符号形状</label>
+      <select
+        value={value || 'circle'}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-2 py-1.5 border border-gray-200 rounded-md text-sm bg-white hover:border-gray-300 focus:border-blue-500 focus:outline-none"
+      >
+        {POINT_SYMBOL_OPTIONS.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
