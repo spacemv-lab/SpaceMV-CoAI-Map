@@ -96,7 +96,7 @@
     "@types/uuid": "^11.0.0",
     "ai": "^6.0.45",
     "axios": "^1.13.2",
-    "bullmq": "^5.70.1",
+    "bullmq": "^5.71.0",
     "cesium": "^1.137.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
