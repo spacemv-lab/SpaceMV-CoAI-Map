@@ -58,7 +58,7 @@
     "jiti": "2.4.2",
     "jsdom": "~22.1.0",
     "nx": "22.3.3",
-    "postcss": "^8.5.6",
+    "postcss": "^8.5.8",
     "prettier": "~3.6.2",
     "prisma": "5.10.2",
     "tailwindcss": "^4.1.18",
