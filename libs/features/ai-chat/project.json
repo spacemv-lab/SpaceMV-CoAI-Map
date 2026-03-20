@@ -1,0 +1,9 @@
+{
+  "name": "ai-chat",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/features/ai-chat/web/src",
+  "projectType": "library",
+  "tags": ["scope:ai-chat"],
+  "// targets": "to see all targets run: nx show project ai-chat --web",
+  "targets": {}
+}

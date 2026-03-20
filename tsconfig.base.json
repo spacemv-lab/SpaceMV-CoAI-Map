@@ -1,0 +1,37 @@
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "rootDir": ".",
+    "sourceMap": true,
+    "declaration": false,
+    "moduleResolution": "node",
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "importHelpers": true,
+    "target": "es2015",
+    "module": "esnext",
+    "lib": ["es2020", "dom"],
+    "skipLibCheck": true,
+    "skipDefaultLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@txwx-monorepo/ui-kit": ["packages/ui-kit/src/index.ts"],
+      "@map-ai/features/ai-chat": ["libs/features/ai-chat/web/src/index.ts"],
+      "@map-ai/features/ai-chat/server": [
+        "libs/features/ai-chat/server/index.ts"
+      ],
+      "@map-ai/features/ai-chat/web": ["libs/features/ai-chat/web/index.ts"],
+      "@map-ai/features/ai-chat/shared": [
+        "libs/features/ai-chat/shared/index.ts"
+      ],
+      "@map-ai/features/map-core": ["libs/features/map-core/src/index.ts"],
+      "@txwx-monorepo/gis-data-manger": [
+        "libs/features/GIS-DataManger/web/src/index.ts"
+      ],
+      "@txwx-monorepo/gis-data-manger-api": [
+        "libs/features/GIS-DataManger/api/src/index.ts"
+      ]
+    }
+  },
+  "exclude": ["node_modules", "tmp"]
+}

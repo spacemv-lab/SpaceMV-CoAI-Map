@@ -1,0 +1,154 @@
+// libs/features/GIS-DataManger/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// Enums
+// ============================================
+
+enum GeometryType {
+  POINT
+  LINESTRING
+  POLYGON
+  MULTI_POINT
+  MULTI_LINESTRING
+  MULTI_POLYGON
+  RASTER
+  UNKNOWN
+}
+
+// 数据导入状态机
+enum IngestStatus {
+  PENDING     // 等待处理
+  PARSING     // 解析中
+  VALIDATING  // 校验中
+  IMPORTING   // 导入中
+  INDEXING    // 构建索引中
+  SUCCESS     // 成功
+  FAILED      // 失败
+}
+
+// 映射类型（用于 CSV/XLSX 列映射）
+enum MappingType {
+  DIRECT      // 直接映射
+  EXPRESSION  // 表达式转换
+  LOOKUP      // 查找表映射
+  CUSTOM      // 自定义函数
+}
+
+// ============================================
+// Models
+// ============================================
+
+// 项目：用于隔离不同业务场景的数据
+model Project {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  ownerId     String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  datasets    Dataset[]
+}
+
+// 数据集：逻辑上的数据集合
+model Dataset {
+  id               String           @id @default(uuid())
+  projectId        String
+  project          Project          @relation(fields: [projectId], references: [id])
+  name             String
+  type             GeometryType
+  source           String // 来源：UPLOAD, SYNC, IMPORT
+  tags             String[]
+  description      String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  versions         DatasetVersion[] @relation("DatasetVersions")
+  currentVersion   DatasetVersion?  @relation("DatasetCurrentVersion", fields: [currentVersionId], references: [id])
+  currentVersionId String?          @unique
+  mappingProfiles  MappingProfile[]
+}
+
+// 数据集版本：每次上传/更新生成一个新版本
+model DatasetVersion {
+  id                String            @id @default(uuid())
+  datasetId         String
+  dataset           Dataset           @relation("DatasetVersions", fields: [datasetId], references: [id])
+  version           Int               @default(1)
+  filePath          String // 原始文件存储路径
+  fileSize          Int // 字节数
+  recordCount       Int               @default(0) // 要素数量
+  uploadedBy        String?
+  status            IngestStatus      @default(PENDING)
+  statusMessage     String? // 状态描述/错误信息
+  sourceCRS         String? // 源坐标系 EPSG 代码
+  targetCRS         String? // 目标坐标系 EPSG 代码
+  bbox              Json? // 边界范围 [minX, minY, maxX, maxY]
+  mappingProfileId  String? // 关联的映射配置
+  mappingProfile    MappingProfile?   @relation(fields: [mappingProfileId], references: [id])
+  validationReport  ValidationReport?
+  createdAt         DateTime          @default(now())
+  startedAt         DateTime?
+  completedAt       DateTime?
+  features          GisFeature[]
+  currentVersionFor Dataset?          @relation("DatasetCurrentVersion")
+
+  @@index([datasetId])
+  @@index([status])
+}
+
+// 具体的空间要素数据
+model GisFeature {
+  id         String           @id @default(uuid())
+  versionId  String
+  version    DatasetVersion   @relation(fields: [versionId], references: [id])
+  properties Json // 存储非几何属性
+  geometry   Unsupported("geometry")? // PostGIS 字段
+
+  @@index([versionId])
+}
+
+// 校验报告
+model ValidationReport {
+  id              String   @id @default(uuid())
+  versionId       String   @unique
+  version         DatasetVersion @relation(fields: [versionId], references: [id])
+  isValid         Boolean  @default(true)
+  errorCount      Int      @default(0)
+  warningCount    Int      @default(0)
+  geometryErrors  Json? // [{featureId, errorType, message}]
+  attributeErrors Json? // [{field, errorType, message}]
+  summary         String? // 校验总结
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([versionId])
+}
+
+// 映射配置：定义 CSV/XLSX 列到目标字段的映射规则
+model MappingProfile {
+  id          String   @id @default(uuid())
+  datasetId   String
+  dataset     Dataset  @relation(fields: [datasetId], references: [id])
+  name        String
+  description String?
+  sourceType  String // CSV, XLSX, GEOJSON, SHAPEFILE
+  mappings    Json // [{sourceColumn, targetField, mappingType, expression, defaultValue}]
+  crs         String? // 默认坐标系
+  geometryColumn String? // 几何列名（WKT/GeoJSON 列）
+  geometryType String? // 几何类型
+  isActive    Boolean  @default(true)
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  versions    DatasetVersion[]
+
+  @@index([datasetId])
+}
