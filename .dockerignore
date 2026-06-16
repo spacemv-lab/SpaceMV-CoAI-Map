@@ -7,8 +7,10 @@
 coverage
 dist
 node_modules
+**/node_modules
 pgdata
 redisdata
+miniodata
 reports
 tmp
 uploads

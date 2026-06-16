@@ -57,13 +57,13 @@ docker compose -f docker/infra/docker-compose.yml up -d
 
 ```bash
 # API service
-pnpm nx serve map-ai-api
+pnpm start:api
 
 # Web service (new terminal)
-pnpm nx serve map-ai
+pnpm start:web
 
 # Agent service (new terminal)
-pnpm nx serve map-ai-agent
+pnpm start:agent
 ```
 
 **Access URLs**:
@@ -77,25 +77,27 @@ pnpm nx serve map-ai-agent
 
 ```bash
 # Build
-pnpm nx build map-ai-api
-pnpm nx build map-ai
+pnpm build:api
+pnpm build:web
 
 # Test
-pnpm nx test map-ai-api
-pnpm nx test map-ai-agent
+pnpm test:api
+uv run --project agent pytest agent/tests/
 
 # Type check
-pnpm nx typecheck map-ai-api
+pnpm typecheck:api
+pnpm typecheck:web
 
-# Format
-pnpm nx format:write
+# Lint
+pnpm lint:api
+pnpm lint:web
 ```
 
 ### Docker
 
 ```bash
-# Start full stack services
-docker compose -f docker/map-ai/compose.local.yml up -d
+# Start PostgreSQL, Redis, MinIO
+docker compose -f docker/infra/docker-compose.yml up -d
 
 # View logs
 docker compose logs -f api
@@ -154,7 +156,7 @@ Found a security vulnerability? Please see [SECURITY.md](SECURITY.md)
 
 For any questions, suggestions, or business cooperation inquiries, please contact the project maintenance team.
 
-- **Email**: code@spacemv.com
+- **Email**: xiaojunwen@spacemv.com
 - **Issues**: [GitHub Issues](https://github.com/spacemv-lab/SpaceMV-CoAI-Map/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/spacemv-lab/SpaceMV-CoAI-Map/discussions)
 

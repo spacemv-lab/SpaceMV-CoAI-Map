@@ -1,6 +1,4 @@
 packages:
-  - 'apps/web/*'
-  - 'apps/server/*'
-  - 'apps/agent/*'
-  - 'features/**/*'
+  - 'web'
+  - 'api'
   - 'packages/*'

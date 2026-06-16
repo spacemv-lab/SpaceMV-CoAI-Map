@@ -1,0 +1,27 @@
+services:
+  api-dev:
+    image: txwx-api-dev:local
+    build:
+      context: ..
+      dockerfile: docker/map-ai-api.Dockerfile
+      target: dev
+    container_name: txwx-api-dev
+    working_dir: /app
+    command: >
+      sh -lc "pnpm exec prisma generate --schema api/prisma/schema.prisma &&
+      pnpm --filter @txwx-monorepo/api dev"
+    env_file:
+      - ../.envs/map-ai/dev/api.docker.env
+    ports:
+      - '127.0.0.1:3000:3000'
+    volumes:
+      - ..:/app
+      - txwx-api-dev-node_modules:/app/node_modules
+      - txwx-api-dev-pnpm-store:/pnpm/store
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    restart: unless-stopped
+
+volumes:
+  txwx-api-dev-node_modules:
+  txwx-api-dev-pnpm-store:

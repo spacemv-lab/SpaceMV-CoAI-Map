@@ -64,6 +64,19 @@ services:
         aliases:
           - minio
 
+  gdal-tools:
+    build:
+      context: ../..
+      dockerfile: docker/gdal-tools.Dockerfile
+    image: txwx-gdal-tools:dev
+    container_name: txwx-gdal-tools
+    restart: always
+    command: ['sleep', 'infinity']
+    networks:
+      default:
+        aliases:
+          - gdal-tools
+
 networks:
   default:
     name: txwx-local-network

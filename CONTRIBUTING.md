@@ -47,14 +47,12 @@ git push origin feature/AmazingFeature
 
 ```bash
 # 运行代码检查
-pnpm nx lint map-ai-api
-
-# 格式化代码
-pnpm nx format:write
+pnpm lint:api
+pnpm lint:web
 
 # Python 代码检查
-pnpm nx run map-ai-agent:lint
-pnpm nx run map-ai-agent:format
+uv run --project agent ruff check agent
+uv run --project agent ruff format agent
 ```
 
 ### 组件设计
@@ -75,8 +73,8 @@ pnpm nx run map-ai-agent:format
 
 ```bash
 # 运行测试
-pnpm nx test map-ai-api
-pnpm nx test map-ai-agent
+pnpm test:api
+uv run --project agent pytest agent/tests/
 ```
 
 ---

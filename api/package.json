@@ -1,0 +1,17 @@
+{
+  "name": "@txwx-monorepo/api",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "ts-node --project tsconfig.app.json --transpile-only -r tsconfig-paths/register src/main.ts",
+    "build": "tsc -p tsconfig.app.json",
+    "start": "node ../dist/api/api/src/main.js",
+    "test": "jest --config jest.config.cts",
+    "test:e2e": "jest --config e2e/jest.config.cts",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit"
+  },
+  "dependencies": {
+    "@txwx-monorepo/chat-contracts": "workspace:*"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "../dist/api",
+    "module": "commonjs",
+    "types": ["node"],
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "target": "es2021",
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@txwx-monorepo/chat-contracts": [
+        "../packages/chat-contracts/src/index.ts"
+      ]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "jest.config.ts",
+    "jest.config.cts",
+    "src/**/*.spec.ts",
+    "src/**/*.test.ts",
+    "src/**/*.d.ts",
+    "src/features/gis-data-manager/lib/feature-api.ts",
+    "src/features/gis-data-manager/lib/feature-api.spec.ts"
+  ]
+}

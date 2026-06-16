@@ -16,20 +16,9 @@
     "baseUrl": ".",
     "paths": {
       "@txwx-monorepo/ui-kit": ["packages/ui-kit/src/index.ts"],
-      "@map-ai/features/ai-chat": ["libs/features/ai-chat/web/src/index.ts"],
-      "@map-ai/features/ai-chat/server": [
-        "libs/features/ai-chat/server/index.ts"
-      ],
-      "@map-ai/features/ai-chat/web": ["libs/features/ai-chat/web/index.ts"],
-      "@map-ai/features/ai-chat/shared": [
-        "libs/features/ai-chat/shared/index.ts"
-      ],
-      "@map-ai/features/map-core": ["libs/features/map-core/src/index.ts"],
-      "@txwx-monorepo/gis-data-manger": [
-        "libs/features/GIS-DataManger/web/src/index.ts"
-      ],
-      "@txwx-monorepo/gis-data-manger-api": [
-        "libs/features/GIS-DataManger/api/src/index.ts"
+      "@txwx-monorepo/api-client": ["packages/api-client/src/index.ts"],
+      "@txwx-monorepo/chat-contracts": [
+        "packages/chat-contracts/src/index.ts"
       ]
     }
   },

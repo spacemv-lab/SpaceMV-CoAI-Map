@@ -1,0 +1,36 @@
+---
+name: 功能建议
+description: 提出新功能建议或改进意见
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢您提出功能建议！请详细描述您的需求以帮助我们理解。
+  - type: input
+    id: problem
+    attributes:
+      label: 您的功能建议是否与某个问题相关？
+      description: 请简要描述您遇到的问题或使用场景
+      placeholder: 例如：我在使用上传功能时希望...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: 您希望的解决方案
+      description: 请详细描述您希望实现的功能
+      placeholder: 例如：希望增加批量上传功能，支持一次选择多个文件...
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 其他替代方案
+      description: 您是否考虑过其他实现方式？
+  - type: textarea
+    id: additional
+    attributes:
+      label: 补充说明
+      description: 任何其他说明、截图或示例

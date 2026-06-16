@@ -6,9 +6,8 @@ dependencies = []
 
 [tool.uv.workspace]
 members = [
-  "apps/map-ai/agent",
-  "features/*/agent",
-  "packages/py-*"
+  "agent",
+  "packages/py-*",
 ]
 
 [dependency-groups]

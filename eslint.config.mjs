@@ -1,64 +1,40 @@
-import nx from '@nx/eslint-plugin';
+import tseslint from 'typescript-eslint';
 
 export default [
-  ...nx.configs['flat/base'],
-  ...nx.configs['flat/typescript'],
-  ...nx.configs['flat/javascript'],
   {
     ignores: [
       '**/dist',
       '**/out-tsc',
+      '**/node_modules',
       '**/vite.config.*.timestamp*',
       '**/vitest.config.*.timestamp*',
     ],
   },
   {
-    files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],
-    rules: {
-      '@nx/enforce-module-boundaries': [
-        'error',
-        {
-          enforceBuildableLibDependency: true,
-          allow: ['^.*/eslint(\\.base)?\\.config\\.[cm]?[jt]s$'],
-          depConstraints: [
-            {
-              sourceTag: 'domain:project-xjw',
-              onlyDependOnLibsWithTags: [
-                'domain:project-xjw',
-                'scope:ai-chat',
-                'scope:shared',
-              ],
-            },
-            {
-              sourceTag: 'domain:platform',
-              onlyDependOnLibsWithTags: [
-                'domain:platform',
-                'scope:ai-chat',
-                'scope:shared',
-              ],
-            },
-            {
-              sourceTag: 'domain:tools',
-              onlyDependOnLibsWithTags: ['domain:tools', 'scope:shared'],
-            },
-            { sourceTag: '*', onlyDependOnLibsWithTags: ['*'] },
-          ],
+    files: ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts'],
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: {
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+        ecmaFeatures: {
+          jsx: true,
         },
-      ],
+      },
     },
+    rules: {},
   },
   {
-    files: [
-      '**/*.ts',
-      '**/*.tsx',
-      '**/*.cts',
-      '**/*.mts',
-      '**/*.js',
-      '**/*.jsx',
-      '**/*.cjs',
-      '**/*.mjs',
-    ],
-    // Override or add rules here
+    files: ['**/*.js', '**/*.jsx', '**/*.cjs', '**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      parserOptions: {
+        ecmaFeatures: {
+          jsx: true,
+        },
+      },
+    },
     rules: {},
   },
 ];

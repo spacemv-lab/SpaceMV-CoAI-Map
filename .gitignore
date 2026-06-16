@@ -17,12 +17,19 @@ node_modules
 .settings/
 *.sublime-workspace
 
+# Python cache
+__pycache__/
+*.pyc
+
+# AI agent config / skills
+.agents/
+.claude/
+.codex/
+.superpowers/
+.trae/
+
 # IDE - VSCode
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+.vscode/
 
 # misc
 /.sass-cache
@@ -40,6 +47,7 @@ Thumbs.db
 
 .nx/cache
 .nx/workspace-data
+.pnpm-store/
 
 vite.config.*.timestamp*
 vitest.config.*.timestamp*
@@ -73,6 +81,12 @@ apps/**/.env
 
 # local MinIO data
 miniodata/
-
 # open-source-release 目录
 open-source-release/
+
+# openspec 目录
+openspec/
+
+# GIS-DataManger local temp workspace
+libs/features/GIS-DataManger/temp/
+audit-release/

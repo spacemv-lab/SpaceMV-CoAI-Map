@@ -1,0 +1,37 @@
+{
+  "plane-blue": {
+    "width": 64,
+    "height": 64,
+    "x": 0,
+    "y": 0,
+    "pixelRatio": 1
+  },
+  "plane-green": {
+    "width": 64,
+    "height": 64,
+    "x": 64,
+    "y": 0,
+    "pixelRatio": 1
+  },
+  "plane-orange": {
+    "width": 64,
+    "height": 64,
+    "x": 128,
+    "y": 0,
+    "pixelRatio": 1
+  },
+  "plane-gray": {
+    "width": 64,
+    "height": 64,
+    "x": 192,
+    "y": 0,
+    "pixelRatio": 1
+  },
+  "ship": {
+    "width": 64,
+    "height": 64,
+    "x": 256,
+    "y": 0,
+    "pixelRatio": 1
+  }
+}

@@ -1,0 +1,22 @@
+# Code Owners
+# 此文件定义了谁负责仓库中的哪些代码路径
+# GitHub 会自动将这些人添加为 Pull Request 的 Reviewer
+
+# 默认所有者
+*                       @spacemv-lab
+
+# 前端
+web/                    @spacemv-lab
+
+# 后端
+api/                    @spacemv-lab
+
+# 智能体
+agent/                  @spacemv-lab
+
+# 共享包
+packages/               @spacemv-lab
+
+# CI/CD 与配置
+.github/                @spacemv-lab
+docker/                 @spacemv-lab

@@ -9,13 +9,33 @@ RUN apt-get update \
 
 RUN corepack enable && corepack prepare pnpm@10.17.1 --activate
 
+# 使用原生镜像源（VPN 环境）
+# RUN pnpm config set registry https://registry.npmmirror.com
+
 WORKDIR /app
 
 COPY . .
 
 RUN pnpm install --no-frozen-lockfile
-RUN pnpm prisma generate --schema libs/features/GIS-DataManger/prisma/schema.prisma
-RUN pnpm nx build map-ai-api
+RUN pnpm prisma generate --schema api/prisma/schema.prisma
+RUN pnpm --filter @txwx-monorepo/api build
+
+FROM node:20-bookworm-slim AS dev
+
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends gdal-bin libgdal32 openssl \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN corepack enable && corepack prepare pnpm@10.17.1 --activate
+
+WORKDIR /app
+
+COPY . .
+
+RUN pnpm install --no-frozen-lockfile
 
 FROM node:20-bookworm-slim
 
@@ -30,10 +50,10 @@ WORKDIR /app
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/libs/features/GIS-DataManger/prisma ./libs/features/GIS-DataManger/prisma
+COPY --from=builder /app/api/prisma ./api/prisma
 
 RUN mkdir -p uploads
 
 EXPOSE 3000
 
-CMD ["node", "dist/apps/map-ai/server/main.js"]
+CMD npx prisma migrate deploy --schema=api/prisma/schema.prisma && node dist/api/main.js

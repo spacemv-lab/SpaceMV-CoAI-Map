@@ -1,0 +1,19 @@
+{
+  "name": "@txwx-monorepo/web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4200",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4200",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit"
+  },
+  "dependencies": {
+    "@txwx-monorepo/api-client": "workspace:*",
+    "@txwx-monorepo/chat-contracts": "workspace:*",
+    "@txwx-monorepo/ui-kit": "workspace:*"
+  }
+}

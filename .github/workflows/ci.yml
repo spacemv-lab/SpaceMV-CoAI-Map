@@ -4,9 +4,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main, develop]
+    branches: [main]
 
 # 取消正在运行的重复工作流
 concurrency:
@@ -25,32 +25,32 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: '10'
           run_install: false
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
       - name: Lint
-        run: pnpm nx lint map-ai
+        run: pnpm lint:web
 
       - name: Type check
-        run: pnpm nx typecheck map-ai
+        run: pnpm typecheck:web
 
       - name: Build
-        run: pnpm nx build map-ai
+        run: pnpm build:web
 
       - name: Test
-        run: pnpm nx test map-ai --passWithNoTests
+        run: pnpm test:web
 
   # ============================================
   # 后端构建和测试
@@ -63,32 +63,32 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: '10'
           run_install: false
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
       - name: Lint
-        run: pnpm nx lint map-ai-api
+        run: pnpm lint:api
 
       - name: Type check
-        run: pnpm nx typecheck map-ai-api
+        run: pnpm typecheck:api
 
       - name: Build
-        run: pnpm nx build map-ai-api
+        run: pnpm build:api
 
       - name: Test
-        run: pnpm nx test map-ai-api
+        run: pnpm test:api
 
   # ============================================
   # Python Agent 构建和测试
@@ -110,29 +110,16 @@ jobs:
         uses: astral-sh/setup-uv@v3
 
       - name: Install dependencies
-        run: |
-          cd apps/map-ai/agent
-          uv sync --dev
+        run: uv sync --project agent
 
       - name: Lint
-        run: |
-          cd apps/map-ai/agent
-          uv run ruff check .
+        run: uv run --project agent ruff check agent
 
       - name: Format check
-        run: |
-          cd apps/map-ai/agent
-          uv run ruff format --check .
-
-      - name: Type check
-        run: |
-          cd apps/map-ai/agent
-          uv run pyright .
+        run: uv run --project agent ruff format --check agent
 
       - name: Test
-        run: |
-          cd apps/map-ai/agent
-          uv run pytest
+        run: uv run --project agent pytest agent/tests
 
   # ============================================
   # 代码质量检查
@@ -145,17 +132,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: '10'
           run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
@@ -173,13 +160,29 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Run TruffleHog (secret scan)
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
-          base: ${{ github.event.repository.default_branch }}
           extra_args: --only-verified
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '10'
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
 
       - name: NPM audit
         run: pnpm audit --audit-level=high || true
@@ -195,21 +198,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: '10'
           run_install: false
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
       - name: Check licenses
         run: |
-          pnpm license-checker --summary --failOn "GPL;AGPL;LGPL;SSPL" || true
+          pnpm exec license-checker --summary --failOn "GPL;AGPL;LGPL;SSPL" || true
