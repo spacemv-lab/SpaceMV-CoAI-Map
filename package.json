@@ -115,7 +115,7 @@
     "react-dropzone": "^15.0.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.13.0",
-    "reflect-metadata": "^0.1.13",
+    "reflect-metadata": "^0.2.2",
     "remark-gfm": "^4.0.1",
     "rxjs": "^7.8.0",
     "shpjs": "^6.2.0",
