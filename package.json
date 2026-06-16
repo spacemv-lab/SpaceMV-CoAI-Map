@@ -93,7 +93,7 @@
     "@types/uuid": "^11.0.0",
     "ai": "^6.0.45",
     "axios": "^1.13.2",
-    "bullmq": "^5.70.1",
+    "bullmq": "^5.78.1",
     "cesium": "^1.137.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
