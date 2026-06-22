@@ -220,7 +220,8 @@ function initEditLayer(map: maplibregl.Map) {
       'fill-color': '#3b82f6',
       'fill-opacity': 0.4,
     },
-    filter: ['in', ['geometry-type'], 'Polygon', 'MultiPolygon'],
+    // 用表达式 match（MapLibre v5 filter 按表达式解析；旧版可变参数 `in` 会报 "Expected 2 arguments, but found 3"）
+    filter: ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false],
   });
 
   // outline 层（线 + 多边形/多面边框，排除 Point 节点）
@@ -2197,7 +2198,10 @@ export function MapLibreLayerRenderer() {
       .MAPLIBRE_MAP;
     if (!map) return;
 
-    initEditLayer(map);
+    // 只读模式（公开分享页）不编辑要素，跳过编辑图层初始化（4 个 __edit-feature__ 层都用不到）
+    if (!useMapStore.getState().readOnly) {
+      initEditLayer(map);
+    }
 
     // 订阅 store 编辑状态变化
     const unsubscribe = useMapStore.subscribe((state, prevState) => {

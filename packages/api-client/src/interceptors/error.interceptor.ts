@@ -123,11 +123,15 @@ export const errorResponseInterceptor = {
         // 显示 toast 提示（用户能看到原因）
         toast.error(`登录已过期: ${errorMsg}`, { duration: 5000 });
 
-        // 延迟 2 秒跳转，让用户看到 toast
-        setTimeout(() => {
-          clearRefreshToken();
-          window.location.href = '/login';
-        }, 2000);
+        // 仅当确实存在过会话（有 refreshToken）时才跳登录。
+        // 匿名上下文（如公开分享页 /share/:token）本就不带 token，其鉴权写入的 401
+        // 属预期，不应把整页踢去 /login。会话过期（曾有 token）才需要回到登录。
+        if (getRefreshToken()) {
+          setTimeout(() => {
+            clearRefreshToken();
+            window.location.href = '/login';
+          }, 2000);
+        }
 
         return Promise.reject(new Error(errorMsg));
       }

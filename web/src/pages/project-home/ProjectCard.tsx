@@ -5,7 +5,8 @@
 
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Map, Calendar, Trash2 } from 'lucide-react';
+import { Map, Calendar, Trash2, Share2 } from 'lucide-react';
+import { ShareDialog } from './ShareDialog';
 
 interface ProjectCardProps {
   id: string;
@@ -17,6 +18,13 @@ interface ProjectCardProps {
 
 export default function ProjectCard({ id, name, datasetCount, updatedAt, onDelete }: ProjectCardProps) {
   const [isDeleting, setIsDeleting] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+
+  const handleShare = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setShareOpen(true);
+  };
   const formattedDate = new Date(updatedAt).toLocaleDateString('zh-CN', {
     year: 'numeric',
     month: 'short',
@@ -42,6 +50,7 @@ export default function ProjectCard({ id, name, datasetCount, updatedAt, onDelet
   };
 
   return (
+    <>
     <Link
       to={`/project/${id}/map`}
       className="group relative flex items-center justify-between p-4 rounded-xl bg-card border border-border hover:border-primary/40 hover:shadow-md transition-all duration-200 w-full"
@@ -67,6 +76,13 @@ export default function ProjectCard({ id, name, datasetCount, updatedAt, onDelet
 
       {/* 操作按钮 */}
       <div className="flex items-center gap-2">
+        <button
+          onClick={handleShare}
+          className="w-10 h-10 rounded-lg bg-muted/30 flex items-center justify-center hover:bg-primary/10 hover:text-primary transition-colors"
+          title="分享工程"
+        >
+          <Share2 className="w-5 h-5" />
+        </button>
         {onDelete && (
           <button
             onClick={handleDelete}
@@ -82,5 +98,12 @@ export default function ProjectCard({ id, name, datasetCount, updatedAt, onDelet
         </div>
       </div>
     </Link>
+    <ShareDialog
+      projectId={id}
+      projectName={name}
+      open={shareOpen}
+      onClose={() => setShareOpen(false)}
+    />
+    </>
   );
 }

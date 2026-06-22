@@ -110,6 +110,7 @@ interface MapStoreActions {
   setViewerReady: (ready: boolean) => void;
   setLegendVisible: (visible: boolean) => void;
   setExperimental: (config: Partial<ExperimentalConfig>) => void;
+  setReadOnly: (value: boolean) => void;
   setRightPanelActiveTab: (tab: RightPanelTab) => void;
   setSelectedFeature: (feature: {
     layerId: string;
@@ -244,6 +245,7 @@ const initialState: MapStateSchema = {
   },
   viewerReady: false,
   legendVisible: true,
+  readOnly: false,
   edit: {
     selectedFeature: null,
     editFeature: null,
@@ -842,6 +844,11 @@ export const useMapStore = create<MapStoreState>()(
         };
       }),
 
+    setReadOnly: (value) =>
+      set((state) => {
+        state.readOnly = value;
+      }),
+
     setRightPanelActiveTab: (tab) =>
       set((state) => {
         state.rightPanelActiveTab = tab;
@@ -1030,6 +1037,8 @@ export const useMapStore = create<MapStoreState>()(
           undoStack: [],
         };
         state.interaction.mode = 'default';
+        // 重置为可写（编辑器默认）；公开分享页会在 reset 后再 setReadOnly(true)
+        state.readOnly = false;
       }),
 
     switchProject: (projectId) =>
@@ -1235,6 +1244,9 @@ let lastProjectId: string | null = null;
  * 使用 viewerReady 标志来判断地图是否已准备好，只有在地图准备好后才开始追踪变化
  */
 useMapStore.subscribe((state) => {
+  // 只读模式（公开分享页）：绝不自动保存，避免匿名触发鉴权写入 → 401 → 跳登录
+  if (state.readOnly) return;
+
   const projectId = state.currentProjectId;
 
   // projectId 变化 → 立即保存旧工程状态（包括变为 null 时离开工程）
@@ -1332,6 +1344,9 @@ function debouncedStyleSave(layerId: string): void {
  * 当图层样式变更时，自动保存到后端
  */
 useMapStore.subscribe((state, prevState) => {
+  // 只读模式：不自动保存图层样式
+  if (state.readOnly) return;
+
   for (const layer of state.layers) {
     const prevLayer = prevState.layers.find((l) => l.id === layer.id);
 
@@ -1357,7 +1372,7 @@ if (typeof window !== 'undefined') {
     const state = useMapStore.getState();
     const projectId = state.currentProjectId;
 
-    if (projectId) {
+    if (projectId && !state.readOnly) {
       const payload = {
         viewport: state.viewport,
         basemap: state.basemap,

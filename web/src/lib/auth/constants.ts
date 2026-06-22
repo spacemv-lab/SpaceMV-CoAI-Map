@@ -40,5 +40,5 @@ export const LOGIN_TYPE = {
   SMS: 'sms',
 } as const;
 
-// 白名单路由（无需认证）
-export const AUTH_WHITE_LIST = ['/login', '/register', '/forgetPassword'] as const;
+// 白名单路由（无需认证）—— 前缀匹配，'/share' 覆盖 '/share/:token'
+export const AUTH_WHITE_LIST = ['/login', '/register', '/forgetPassword', '/share'] as const;

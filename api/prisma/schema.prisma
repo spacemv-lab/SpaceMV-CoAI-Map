@@ -64,6 +64,22 @@ model Project {
   updatedAt   DateTime  @updatedAt
   datasets    Dataset[]
   state       ProjectState?
+  shares      ProjectShare[] @relation("ProjectShares")
+}
+
+// 项目公开分享链接：匿名、只读、可嵌入的地图分享
+model ProjectShare {
+  id         String     @id @default(uuid())
+  token      String     @unique // url-safe 随机 token，≥24 字节熵
+  projectId  String
+  project    Project    @relation("ProjectShares", fields: [projectId], references: [id], onDelete: Cascade)
+  label      String? // 自由备注，如 "wendao 文章 X"
+  createdAt  DateTime   @default(now())
+  revokedAt  DateTime? // 撤销时间；非空表示已失效
+  expiresAt  DateTime? // 可选过期时间
+  viewCount  Int        @default(0) // 成功加载次数（非唯一访客）
+
+  @@index([projectId])
 }
 
 // 项目状态：存储地图视图状态和图层配置

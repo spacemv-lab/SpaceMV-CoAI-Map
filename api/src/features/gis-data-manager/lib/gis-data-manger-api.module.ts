@@ -9,6 +9,9 @@ import { DatasetController } from './dataset.controller';
 import { ProjectController } from './project.controller';
 import { StorageStatsController } from './storage-stats.controller';
 import { ExternalDataController } from './external-data.controller';
+import { PublicShareController } from './public-share.controller';
+import { ProjectShareController } from './project-share.controller';
+import { ProjectShareService } from './project-share.service';
 import { DatasetService } from './dataset.service';
 import { GisParseService } from '../services/gis-parse.service';
 import { ValidationService } from '../services/validation.service';
@@ -55,11 +58,14 @@ import { FieldStatsService } from './field-stats.service';
     DatasetController,
     StorageStatsController,
     ExternalDataController,
+    PublicShareController,
+    ProjectShareController,
   ],
   providers: [
     // Core Services
     GdalService,
     DatasetService,
+    ProjectShareService,
     GisParseService,
     ValidationService,
     MappingProfileService,

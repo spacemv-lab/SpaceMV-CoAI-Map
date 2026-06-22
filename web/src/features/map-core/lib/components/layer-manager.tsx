@@ -39,7 +39,7 @@ import {
 } from 'lucide-react';
 import { recordInteractionMetric } from '../monitoring/performance-monitor';
 
-export function LayerManager() {
+export function LayerManager({ readOnly = false }: { readOnly?: boolean } = {}) {
   const viewerReady = useMapStore((state) => state.viewerReady);
   const layers = useMapStore((state) => state.layers);
   const removeLayer = useMapStore((state) => state.removeLayer);
@@ -442,22 +442,24 @@ export function LayerManager() {
           <Layers className="w-4 h-4" />
           <span>图层管理</span>
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            className="p-1.5 hover:bg-white hover:shadow-sm rounded text-gray-600 transition-all"
-            onClick={() => addBlankLayer('New Layer')}
-            title="添加空白图层"
-          >
-            <FileText className="w-4 h-4" />
-          </button>
-          <button
-            className="p-1.5 hover:bg-white hover:shadow-sm rounded text-blue-600 transition-all"
-            onClick={() => setIsAddModalOpen(true)}
-            title="添加图层"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="flex items-center gap-1">
+            <button
+              className="p-1.5 hover:bg-white hover:shadow-sm rounded text-gray-600 transition-all"
+              onClick={() => addBlankLayer('New Layer')}
+              title="添加空白图层"
+            >
+              <FileText className="w-4 h-4" />
+            </button>
+            <button
+              className="p-1.5 hover:bg-white hover:shadow-sm rounded text-blue-600 transition-all"
+              onClick={() => setIsAddModalOpen(true)}
+              title="添加图层"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Layer List */}
@@ -472,19 +474,21 @@ export function LayerManager() {
           <div
             key={layer.id}
             className={`flex items-center justify-between p-2 rounded group relative transition-colors ${draggedItemIndex === index ? 'opacity-50 bg-gray-100 border-dashed border-2 border-gray-300' : 'hover:bg-gray-50 bg-white border border-transparent hover:border-gray-200'} ${activeLayerId === layer.id ? 'ring-2 ring-blue-500 ring-inset' : ''}`}
-            draggable
-            onDragStart={(e) => handleDragStart(e, index)}
-            onDragOver={(e) => handleDragOver(e)}
-            onDrop={(e) => handleDrop(e, index)}
+            draggable={!readOnly}
+            onDragStart={readOnly ? undefined : (e) => handleDragStart(e, index)}
+            onDragOver={readOnly ? undefined : (e) => handleDragOver(e)}
+            onDrop={readOnly ? undefined : (e) => handleDrop(e, index)}
           >
             <div className="flex items-center gap-2 overflow-hidden flex-1">
               {/* Drag Handle */}
-              <div className="cursor-grab text-gray-300 hover:text-gray-500 active:cursor-grabbing">
-                <GripVertical className="w-4 h-4" />
-              </div>
+              {!readOnly && (
+                <div className="cursor-grab text-gray-300 hover:text-gray-500 active:cursor-grabbing">
+                  <GripVertical className="w-4 h-4" />
+                </div>
+              )}
 
               {/* Active Indicator */}
-              {activeLayerId === layer.id && (
+              {!readOnly && activeLayerId === layer.id && (
                 <div className="text-blue-500" title="当前编辑图层">
                   <Pencil className="w-3 h-3" />
                 </div>
@@ -534,11 +538,15 @@ export function LayerManager() {
                 <span
                   className="text-sm truncate select-none flex-1 text-gray-700 font-medium"
                   title={layer.name}
-                  onDoubleClick={() => {
-                    // Save original name before entering edit mode
-                    setRenameOriginalName(layer.name);
-                    setRenameLayerId(layer.id);
-                  }}
+                  onDoubleClick={
+                    readOnly
+                      ? undefined
+                      : () => {
+                          // Save original name before entering edit mode
+                          setRenameOriginalName(layer.name);
+                          setRenameLayerId(layer.id);
+                        }
+                  }
                 >
                   {layer.name}
                 </span>
@@ -550,7 +558,17 @@ export function LayerManager() {
               )}
             </div>
 
-            {/* Actions */}
+            {/* Actions：只读视图仅保留“缩放至图层”（安全的查看动作）；
+                编辑/属性表/标注/样式/改名/删除等写操作只在编辑器（!readOnly）出现 */}
+            {readOnly ? (
+              <button
+                className="p-1 rounded hover:bg-gray-200 text-gray-500 transition-colors"
+                onClick={() => handleZoomToLayer(layer.id)}
+                title="缩放至图层"
+              >
+                <Search className="w-4 h-4" />
+              </button>
+            ) : (
             <DropdownMenu
               key={`dropdown-${layer.id}`}
               open={openDropdownId === layer.id}
@@ -670,6 +688,7 @@ export function LayerManager() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            )}
           </div>
         ))}
       </div>

@@ -15,6 +15,7 @@ const HomePage = lazy(() => import('../pages/project-home/Index'));
 const MapPage = lazy(() => import('../pages/home/Index'));
 const DataPage = lazy(() => import('../pages/data/Index'));
 const ProjectDataPage = lazy(() => import('../pages/project/data/Index'));
+const SharePage = lazy(() => import('../pages/share/Index'));
 
 // 占位页面组件
 const PlaceholderPage = ({ title }: { title: string }) => (
@@ -33,6 +34,15 @@ const router = createBrowserRouter([
   {
     path: '/register',
     element: <RegisterPage />,
+  },
+  // 公开分享页（无需认证，只读地图）
+  {
+    path: '/share/:token',
+    element: (
+      <Suspense fallback={<div className="p-6 text-sm">正在加载分享地图…</div>}>
+        <SharePage />
+      </Suspense>
+    ),
   },
   // 受保护的路由
   {

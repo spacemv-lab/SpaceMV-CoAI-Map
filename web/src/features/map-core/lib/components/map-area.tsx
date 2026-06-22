@@ -21,7 +21,7 @@ import { useMapPerformanceMonitor } from '../hooks/use-map-performance-monitor';
  * Toolbars are positioned at top-right, floating over the map.
  * Bottom elements (AttributePanel, BottomBar, BottomLog) are constrained to this area.
  */
-export function MapArea() {
+export function MapArea({ readOnly = false }: { readOnly?: boolean } = {}) {
   useMapPerformanceMonitor({ sceneType: 'browse' });
 
   const attributePanel = useMapStore((state) => state.attributePanel);
@@ -42,26 +42,32 @@ export function MapArea() {
 
       {/* UI Overlays - left side */}
       <div className="absolute top-4 left-4 z-10">
-        <LayerManager />
+        <LayerManager readOnly={readOnly} />
       </div>
 
-      <div
-        className="absolute left-4 z-10 transition-all duration-300"
-        style={{ bottom: `${dockOffset + 12}px` }}
-      >
-        <LegendPanel />
-      </div>
+      {!readOnly && (
+        <div
+          className="absolute left-4 z-10 transition-all duration-300"
+          style={{ bottom: `${dockOffset + 12}px` }}
+        >
+          <LegendPanel />
+        </div>
+      )}
 
-      {/* Toolbars - top-right, floating over map */}
-      <div className="absolute top-4 right-4 z-10 flex flex-col gap-4">
-        <MapToolbar />
-        <DrawToolbar />
-      </div>
+      {/* Toolbars - top-right, floating over map (editing tools, hidden in readOnly) */}
+      {!readOnly && (
+        <div className="absolute top-4 right-4 z-10 flex flex-col gap-4">
+          <MapToolbar />
+          <DrawToolbar />
+        </div>
+      )}
 
-      {/* Bottom elements - constrained to MapArea width */}
-      <div className="absolute bottom-0 left-0 right-0 z-20">
-        <AttributePanel />
-      </div>
+      {/* Bottom elements - constrained to MapArea width (hidden in readOnly) */}
+      {!readOnly && (
+        <div className="absolute bottom-0 left-0 right-0 z-20">
+          <AttributePanel />
+        </div>
+      )}
       <div
         className="bottombar absolute left-4 z-20 transition-all duration-300"
         style={{

@@ -292,6 +292,12 @@ export type MapStateSchema = {
   };
   viewerReady: boolean;
   legendVisible: boolean;
+  /**
+   * 只读模式：公开分享页(/share/:token)设为 true。
+   * 为 true 时，store 的所有自动写入(autosave /style、beforeunload PUT /state)一律跳过，
+   * 确保只读视图绝不触发鉴权写入接口（否则匿名 401 会被全局拦截器踢去 /login）。
+   */
+  readOnly: boolean;
   edit: EditState;
   experimental?: ExperimentalConfig;
 };

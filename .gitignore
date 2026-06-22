@@ -69,8 +69,9 @@ deploy/k8s/**/secret.yaml
 # !.envs/*.env.example
 
 # 新的环境文件规则 - 所有 .env 文件忽略，.env.example 例外
-.envs/*/*.env
-!.envs/*/*.env.example
+# 用 ** 覆盖 .envs/<product>/<envset>/ 的任意深度（如 .envs/map-ai/dev/api.env）
+.envs/**/*.env
+!.envs/**/*.env.example
 
 # agent 环境文件（兼容旧结构）
 apps/**/.env
@@ -90,3 +91,6 @@ openspec/
 # GIS-DataManger local temp workspace
 libs/features/GIS-DataManger/temp/
 audit-release/
+
+# shell 崩溃转储
+*.stackdump
