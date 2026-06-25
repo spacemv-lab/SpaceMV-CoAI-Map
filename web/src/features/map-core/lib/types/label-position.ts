@@ -33,6 +33,28 @@ export type LineLabelPosition = 'along' | 'start' | 'end' | 'middle';
 export type PolygonLabelPosition = 'center' | 'boundary';
 
 /**
+ * 面要素标注放置模式
+ * - auto: 自动寻位（text-variable-anchor，引擎在候选锚点里挑不重叠的位置）
+ * - fixed: 固定锚点（text-anchor + text-offset）
+ */
+export type PolygonLabelPlacementMode = 'auto' | 'fixed';
+
+/**
+ * auto 模式默认候选锚点（九宫格全选）
+ */
+export const DEFAULT_LABEL_ANCHOR_CANDIDATES: PointLabelPosition[] = [
+  'center',
+  'top',
+  'bottom',
+  'left',
+  'right',
+  'top-left',
+  'top-right',
+  'bottom-left',
+  'bottom-right',
+];
+
+/**
  * 联合类型 - 所有标注位置选项
  */
 export type LabelPosition =

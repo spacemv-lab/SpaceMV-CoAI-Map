@@ -34,6 +34,12 @@ import {
   DEFAULT_EXPORT_CONFIG,
   getOffsetsForPreset,
 } from '../types/export-state';
+import {
+  addDatasetField,
+  updateDatasetField,
+  removeDatasetField,
+} from '@/features/gis-data-manager/feature-api';
+import { toast } from 'sonner';
 
 interface MapStoreActions {
   addLayer: (layer: LayerState) => void;
@@ -108,6 +114,7 @@ interface MapStoreActions {
   }) => void;
   setInteractionMode: (mode: InteractionMode) => void;
   setViewerReady: (ready: boolean) => void;
+  setPanelResizing: (isResizing: boolean) => void;
   setLegendVisible: (visible: boolean) => void;
   setExperimental: (config: Partial<ExperimentalConfig>) => void;
   setReadOnly: (value: boolean) => void;
@@ -127,10 +134,13 @@ interface MapStoreActions {
   openExportPanel: () => void;
   closeExportPanel: () => void;
   setExportSelectionBox: (box: ExportPanelState['selectionBox']) => void;
+  setExportAspectRatio: (ratio: number | null) => void;
+  setExportContainerSize: (size: { width: number; height: number } | null) => void;
+  resizeExportBox: (exportWidth: number, exportHeight: number) => void;
   setExportConfig: (config: ExportConfig) => void;
   updateExportElement: (
-    element: 'title' | 'northArrow' | 'scaleBar' | 'legend' | 'tianditu',
-    updates: Partial<ExportConfig['title']> | Partial<ExportConfig['northArrow']> | Partial<ExportConfig['scaleBar']> | Partial<ExportConfig['legend']> | Partial<ExportConfig['tianditu']>
+    element: 'title' | 'northArrow' | 'scaleBar' | 'legend' | 'tianditu' | 'brand',
+    updates: Partial<ExportConfig['title']> | Partial<ExportConfig['northArrow']> | Partial<ExportConfig['scaleBar']> | Partial<ExportConfig['legend']> | Partial<ExportConfig['tianditu']> | Partial<ExportConfig['brand']>
   ) => void;
   // Project context actions
   setCurrentProjectId: (projectId: string | null) => void;
@@ -244,7 +254,8 @@ const initialState: MapStateSchema = {
     datasetId: null,
   },
   viewerReady: false,
-  legendVisible: true,
+  legendVisible: false,
+  isPanelResizing: false,
   readOnly: false,
   edit: {
     selectedFeature: null,
@@ -258,8 +269,54 @@ const initialState: MapStateSchema = {
     selectionBox: null,
     config: DEFAULT_EXPORT_CONFIG,
     pixelSize: null,
+    aspectRatio: null,
+    containerSize: null,
   },
 };
+
+// --- Export box geometry helpers (CSS pixel space) ---
+
+function boxCenter(b: { startX: number; startY: number; endX: number; endY: number }) {
+  return { cx: (b.startX + b.endX) / 2, cy: (b.startY + b.endY) / 2 };
+}
+
+// Largest box with the given ratio that does not exceed maxW or the container.
+function fitRatioBox(
+  maxW: number,
+  ratio: number,
+  container: { width: number; height: number },
+): { w: number; h: number } {
+  let w = Math.min(maxW, container.width);
+  let h = w / ratio;
+  if (h > container.height) {
+    h = container.height;
+    w = h * ratio;
+  }
+  if (w > container.width) {
+    w = container.width;
+    h = w / ratio;
+  }
+  return { w, h };
+}
+
+// Place a box of size (w,h) centered at (cx,cy), nudged to stay inside the container.
+function placeBoxCentered(
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+  container: { width: number; height: number },
+): { startX: number; startY: number; endX: number; endY: number } {
+  const sw = Math.min(w, container.width);
+  const sh = Math.min(h, container.height);
+  let startX = cx - sw / 2;
+  let startY = cy - sh / 2;
+  if (startX < 0) startX = 0;
+  if (startY < 0) startY = 0;
+  if (startX + sw > container.width) startX = container.width - sw;
+  if (startY + sh > container.height) startY = container.height - sh;
+  return { startX, startY, endX: startX + sw, endY: startY + sh };
+}
 
 export const useMapStore = create<MapStoreState>()(
   immer((set, get) => ({
@@ -488,7 +545,26 @@ export const useMapStore = create<MapStoreState>()(
         }
       }),
 
-    addLayerField: (layerId, field, defaultValue = null) =>
+    addLayerField: async (layerId, field, defaultValue = null) => {
+      const layer = get().layers.find((candidate) => candidate.id === layerId);
+      if (!layer) {
+        return;
+      }
+      // 数据集图层（后端存储）：先持久化字段 schema，后端会回填要素默认值
+      if (layer.sourceId) {
+        try {
+          await addDatasetField(layer.sourceId, {
+            name: field.name,
+            alias: field.alias,
+            type: field.type,
+            nullable: field.nullable,
+            defaultValue,
+          });
+        } catch {
+          toast.error('添加字段失败');
+          return;
+        }
+      }
       set((state) => {
         const layer = state.layers.find(
           (candidate) => candidate.id === layerId,
@@ -518,9 +594,28 @@ export const useMapStore = create<MapStoreState>()(
             [normalizedField.name]: defaultValue,
           };
         });
-      }),
+      });
+    },
 
-    updateLayerField: (layerId, fieldName, updates) =>
+    updateLayerField: async (layerId, fieldName, updates) => {
+      const layer = get().layers.find((candidate) => candidate.id === layerId);
+      if (!layer) {
+        return;
+      }
+      const nextName = updates.name?.trim() || fieldName;
+      if (layer.sourceId) {
+        try {
+          await updateDatasetField(layer.sourceId, fieldName, {
+            name: nextName,
+            alias: updates.alias,
+            type: updates.type,
+            nullable: updates.nullable,
+          });
+        } catch {
+          toast.error('更新字段失败');
+          return;
+        }
+      }
       set((state) => {
         const layer = state.layers.find(
           (candidate) => candidate.id === layerId,
@@ -537,7 +632,6 @@ export const useMapStore = create<MapStoreState>()(
           return;
         }
 
-        const nextName = updates.name?.trim() || fieldName;
         if (
           nextName !== fieldName &&
           layer.fields?.some((field) => field.name === nextName)
@@ -564,9 +658,22 @@ export const useMapStore = create<MapStoreState>()(
             feature.properties = currentProperties;
           });
         }
-      }),
+      });
+    },
 
-    removeLayerField: (layerId, fieldName) =>
+    removeLayerField: async (layerId, fieldName) => {
+      const layer = get().layers.find((candidate) => candidate.id === layerId);
+      if (!layer) {
+        return;
+      }
+      if (layer.sourceId) {
+        try {
+          await removeDatasetField(layer.sourceId, fieldName);
+        } catch {
+          toast.error('删除字段失败');
+          return;
+        }
+      }
       set((state) => {
         const layer = state.layers.find(
           (candidate) => candidate.id === layerId,
@@ -584,7 +691,8 @@ export const useMapStore = create<MapStoreState>()(
             delete feature.properties[fieldName];
           }
         });
-      }),
+      });
+    },
 
     setFeatureOverride: (layerId, featureId, override) =>
       set((state) => {
@@ -831,6 +939,11 @@ export const useMapStore = create<MapStoreState>()(
         state.viewerReady = ready;
       }),
 
+    setPanelResizing: (isResizing) =>
+      set((state) => {
+        state.isPanelResizing = isResizing;
+      }),
+
     setLegendVisible: (visible) =>
       set((state) => {
         state.legendVisible = visible;
@@ -935,6 +1048,7 @@ export const useMapStore = create<MapStoreState>()(
         state.exportPanel.isOpen = true;
         state.exportPanel.selectionBox = null;
         state.exportPanel.pixelSize = null;
+        state.exportPanel.aspectRatio = null;
         // Reset config to defaults each time
         state.exportPanel.config = { ...DEFAULT_EXPORT_CONFIG };
       }),
@@ -949,14 +1063,64 @@ export const useMapStore = create<MapStoreState>()(
     setExportSelectionBox: (box) =>
       set((state) => {
         state.exportPanel.selectionBox = box;
-        // Calculate pixel size from box coordinates
+        // pixelSize = export pixels (box CSS size × devicePixelRatio)
         if (box) {
-          const width = Math.abs(box.endX - box.startX);
-          const height = Math.abs(box.endY - box.startY);
-          state.exportPanel.pixelSize = { width, height };
+          const dpr = window.devicePixelRatio || 1;
+          const cssWidth = Math.abs(box.endX - box.startX);
+          const cssHeight = Math.abs(box.endY - box.startY);
+          state.exportPanel.pixelSize = {
+            width: Math.round(cssWidth * dpr),
+            height: Math.round(cssHeight * dpr),
+          };
         } else {
           state.exportPanel.pixelSize = null;
         }
+      }),
+
+    setExportAspectRatio: (ratio) =>
+      set((state) => {
+        state.exportPanel.aspectRatio = ratio;
+        const { selectionBox, containerSize } = state.exportPanel;
+        // Free mode, or nothing to reshape yet — just store the ratio.
+        if (ratio == null || !selectionBox || !containerSize) return;
+        // Reshape existing box to the ratio, keeping its current width, center-anchored.
+        const curW = Math.abs(selectionBox.endX - selectionBox.startX);
+        const { w, h } = fitRatioBox(curW, ratio, containerSize);
+        const { cx, cy } = boxCenter(selectionBox);
+        const dpr = window.devicePixelRatio || 1;
+        state.exportPanel.selectionBox = placeBoxCentered(cx, cy, w, h, containerSize);
+        state.exportPanel.pixelSize = {
+          width: Math.round(w * dpr),
+          height: Math.round(h * dpr),
+        };
+      }),
+
+    setExportContainerSize: (size) =>
+      set((state) => {
+        state.exportPanel.containerSize = size;
+      }),
+
+    resizeExportBox: (exportWidth, exportHeight) =>
+      set((state) => {
+        const { selectionBox, containerSize, aspectRatio } = state.exportPanel;
+        if (!selectionBox || !containerSize) return;
+        const dpr = window.devicePixelRatio || 1;
+        const cssW = Math.max(1, exportWidth / dpr);
+        const cssH = Math.max(1, exportHeight / dpr);
+        let w: number;
+        let h: number;
+        if (aspectRatio != null) {
+          ({ w, h } = fitRatioBox(cssW, aspectRatio, containerSize));
+        } else {
+          w = Math.min(cssW, containerSize.width);
+          h = Math.min(cssH, containerSize.height);
+        }
+        const { cx, cy } = boxCenter(selectionBox);
+        state.exportPanel.selectionBox = placeBoxCentered(cx, cy, w, h, containerSize);
+        state.exportPanel.pixelSize = {
+          width: Math.round(w * dpr),
+          height: Math.round(h * dpr),
+        };
       }),
 
     setExportConfig: (config) =>

@@ -3,6 +3,7 @@
  * This project is licensed under the MIT License - see the LICENSE file in the project root for details.
  */
 
+import { useEffect, useState } from 'react';
 import { useMapStore } from '../../store/use-map-store';
 import { ElementPresetPosition, NorthArrowStyle } from '../../types/export-state';
 import { Download, X } from 'lucide-react';
@@ -31,9 +32,30 @@ const PRESET_OPTIONS: { value: ElementPresetPosition; label: string }[] = [
   { value: 'bottom-right', label: '右下' },
 ];
 
+type RatioMode = 'custom' | '1:1' | '4:3' | '16:9' | '3:2';
+
+// Aspect-ratio presets (value = width / height). Selecting one links W/H and
+// constrains the drag. 自定义 = no link (free W/H input), the default mode.
+const RATIO_PRESETS: { id: RatioMode; label: string; value: number }[] = [
+  { id: '1:1', label: '1:1', value: 1 },
+  { id: '4:3', label: '4:3', value: 4 / 3 },
+  { id: '16:9', label: '16:9', value: 16 / 9 },
+  { id: '3:2', label: '3:2', value: 3 / 2 },
+];
+
+const PRESET_EPSILON = 0.001;
+
+// Infer the chip mode from a stored ratio (initial state only; local `mode` is
+// authoritative once the user clicks). null or any non-preset ratio → 自定义 (free).
+function activeRatioId(ratio: number | null): RatioMode {
+  if (ratio == null) return 'custom';
+  const match = RATIO_PRESETS.find((p) => Math.abs(ratio - p.value) < PRESET_EPSILON);
+  return match ? match.id : 'custom';
+}
+
 interface ElementConfigRowProps {
   label: string;
-  elementKey: 'title' | 'northArrow' | 'scaleBar' | 'legend' | 'tianditu';
+  elementKey: 'title' | 'northArrow' | 'scaleBar' | 'legend' | 'tianditu' | 'brand';
   showTextInput?: boolean;
   showStyleSelector?: boolean;
 }
@@ -147,85 +169,217 @@ function ElementConfigRow({ label, elementKey, showTextInput, showStyleSelector 
   );
 }
 
+/**
+ * Single numeric dimension input. Commits to the store on blur/Enter (not per keystroke)
+ * so typing a full number doesn't collapse the selection box intermediate-digit by digit.
+ */
+function DimensionInput({
+  label,
+  value,
+  disabled,
+  onCommit,
+}: {
+  label: string;
+  value: number | null;
+  disabled: boolean;
+  onCommit: (n: number) => void;
+}) {
+  const [text, setText] = useState('');
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!editing) setText(value == null ? '' : String(value));
+  }, [value, editing]);
+
+  return (
+    <div className="flex items-center gap-1">
+      <span className="text-xs text-slate-500">{label}</span>
+      <input
+        type="number"
+        min={0}
+        value={text}
+        disabled={disabled}
+        placeholder="—"
+        onFocus={() => setEditing(true)}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => {
+          setEditing(false);
+          onCommit(Math.max(0, Math.floor(Number(text) || 0)));
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        }}
+        className="w-20 px-2 py-1 text-xs border border-slate-200 rounded bg-white disabled:bg-slate-100 disabled:text-slate-400"
+      />
+    </div>
+  );
+}
+
+function SizeControls({
+  aspectRatio,
+  pixelSize,
+  hasBox,
+  onRatioChange,
+  onResize,
+}: {
+  aspectRatio: number | null;
+  pixelSize: { width: number; height: number } | null;
+  hasBox: boolean;
+  onRatioChange: (ratio: number | null) => void;
+  onResize: (exportWidth: number, exportHeight: number) => void;
+}) {
+  // Local mode is authoritative for which chip is lit (initialized from the stored
+  // ratio, which resets to null/custom whenever the panel reopens → component remounts).
+  const [mode, setMode] = useState<RatioMode>(() => activeRatioId(aspectRatio));
+
+  const handlePreset = (id: RatioMode, value: number) => {
+    setMode(id);
+    onRatioChange(value);
+  };
+
+  const handleCustom = () => {
+    setMode('custom');
+    onRatioChange(null); // 自定义 = free W/H input, no ratio lock
+  };
+
+  // Under a preset ratio, editing one dimension derives the other. Under 自定义 the
+  // two are independent (so an exact arbitrary size like 900×383 can be typed directly).
+  const commitWidth = (w: number) => {
+    if (aspectRatio != null && aspectRatio > 0) onResize(w, Math.round(w / aspectRatio));
+    else if (pixelSize) onResize(w, pixelSize.height);
+  };
+
+  const commitHeight = (h: number) => {
+    if (aspectRatio != null && aspectRatio > 0) onResize(Math.round(h * aspectRatio), h);
+    else if (pixelSize) onResize(pixelSize.width, h);
+  };
+
+  const chipClass = (active: boolean) =>
+    `px-2 py-1 text-xs rounded border transition-colors ${
+      active
+        ? 'bg-blue-600 text-white border-blue-600'
+        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+    }`;
+
+  return (
+    <div className="space-y-2">
+      {/* Ratio chips: presets link W/H; 自定义 = free input */}
+      <div className="text-xs font-medium text-slate-600">比例</div>
+      <div className="flex flex-wrap gap-1">
+        {RATIO_PRESETS.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => handlePreset(p.id, p.value)}
+            className={chipClass(mode === p.id)}
+          >
+            {p.label}
+          </button>
+        ))}
+        <button onClick={handleCustom} className={chipClass(mode === 'custom')}>
+          自定义
+        </button>
+      </div>
+
+      {/* Numeric export dimensions */}
+      <div className="flex items-center gap-2 pt-1">
+        <DimensionInput
+          label="宽"
+          value={hasBox ? pixelSize?.width ?? null : null}
+          disabled={!hasBox}
+          onCommit={commitWidth}
+        />
+        <span className="text-xs text-slate-400">×</span>
+        <DimensionInput
+          label="高"
+          value={hasBox ? pixelSize?.height ?? null : null}
+          disabled={!hasBox}
+          onCommit={commitHeight}
+        />
+        <span className="text-xs text-slate-400">px</span>
+      </div>
+
+      {hasBox && pixelSize && (
+        <div className="text-xs text-slate-500">
+          实际导出: <span className="font-mono text-slate-700">{pixelSize.width} × {pixelSize.height}</span> px
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ExportConfigPanel() {
-  const isOpen = useMapStore((state) => state.exportPanel.isOpen);
   const selectionBox = useMapStore((state) => state.exportPanel.selectionBox);
   const pixelSize = useMapStore((state) => state.exportPanel.pixelSize);
+  const aspectRatio = useMapStore((state) => state.exportPanel.aspectRatio);
+  const setExportAspectRatio = useMapStore((state) => state.setExportAspectRatio);
+  const resizeExportBox = useMapStore((state) => state.resizeExportBox);
   const closeExportPanel = useMapStore((state) => state.closeExportPanel);
 
-  // Only show when selection is complete
-  if (!isOpen || !selectionBox) return null;
+  const hasBox = !!selectionBox;
 
-  const handleExport = async () => {
-    // Trigger export (will be implemented in Task 6)
+  const handleExport = () => {
+    // selectionBox/pixelSize are captured in the event detail so the export
+    // compositor has them even though closeExportPanel() clears the store.
     window.dispatchEvent(new CustomEvent('map:export-image', {
       detail: { selectionBox, pixelSize }
     }));
     closeExportPanel();
   };
 
-  // Calculate panel position (right side of selection box)
-  const panelWidth = 200;
-  const panelLeft = selectionBox.endX + 10;
-
-  // Ensure panel doesn't go off-screen
-  const adjustedLeft = Math.min(panelLeft, window.innerWidth - panelWidth - 20);
-
-  // Calculate panel height and scroll area height
-  const boxHeight = Math.abs(selectionBox.endY - selectionBox.startY);
-  const headerHeight = 42; // header + size display
-  const footerHeight = 48; // export button
-  const scrollAreaHeight = boxHeight - headerHeight - footerHeight - 20; // padding
-
   return (
-    <div
-      className="absolute z-50 bg-white/95 backdrop-blur shadow-lg border rounded-lg w-[200px] flex flex-col"
-      style={{
-        left: adjustedLeft,
-        top: selectionBox.startY,
-        height: boxHeight,
-      }}
-    >
+    <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b bg-slate-50 rounded-t-lg shrink-0">
+      <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
         <span className="text-sm font-semibold text-slate-700">导出配置</span>
         <button
           onClick={closeExportPanel}
-          className="p-1 rounded hover:bg-slate-200 text-slate-500"
+          className="p-1 rounded hover:bg-slate-100 text-slate-500"
+          aria-label="退出导出"
         >
           <X className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Size display */}
-      <div className="px-3 py-2 border-b bg-slate-50 shrink-0">
-        <div className="text-xs text-slate-500">
-          尺寸: <span className="font-mono text-slate-700">{pixelSize?.width} x {pixelSize?.height}</span> px
+      {/* Size + ratio controls — always visible (ratio can be pre-selected before drawing) */}
+      <div className="px-4 py-3 border-b bg-slate-50 shrink-0">
+        <SizeControls
+          aspectRatio={aspectRatio}
+          pixelSize={pixelSize}
+          hasBox={hasBox}
+          onRatioChange={setExportAspectRatio}
+          onResize={resizeExportBox}
+        />
+      </div>
+
+      {!hasBox ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-slate-400 text-sm p-8 text-center gap-2">
+          <Download className="w-8 h-8" />
+          <div>请在地图上框选导出范围</div>
         </div>
-      </div>
+      ) : (
+        <>
+          {/* Element configs - scrollable */}
+          <div className="flex-1 overflow-y-auto min-h-0 px-4 py-3 space-y-3">
+            <ElementConfigRow label="标题" elementKey="title" showTextInput />
+            <ElementConfigRow label="指北针" elementKey="northArrow" showStyleSelector />
+            <ElementConfigRow label="比例尺" elementKey="scaleBar" />
+            <ElementConfigRow label="图例" elementKey="legend" />
+            <ElementConfigRow label="天地图" elementKey="tianditu" />
+            <ElementConfigRow label="品牌" elementKey="brand" showTextInput />
+          </div>
 
-      {/* Element configs - scrollable */}
-      <div
-        className="px-3 py-3 space-y-3 overflow-y-auto shrink-0"
-        style={{ height: Math.max(scrollAreaHeight, 100) }}
-      >
-        <ElementConfigRow label="标题" elementKey="title" showTextInput />
-        <ElementConfigRow label="指北针" elementKey="northArrow" showStyleSelector />
-        <ElementConfigRow label="比例尺" elementKey="scaleBar" />
-        <ElementConfigRow label="图例" elementKey="legend" />
-        <ElementConfigRow label="天地图" elementKey="tianditu" />
-      </div>
-
-      {/* Export button */}
-      <div className="px-3 py-2 border-t bg-slate-50 rounded-b-lg shrink-0 mt-auto">
-        <button
-          onClick={handleExport}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-slate-900 text-white text-sm rounded hover:bg-slate-800"
-        >
-          <Download className="w-4 h-4" />
-          导出 PNG
-        </button>
-      </div>
+          {/* Export button */}
+          <div className="px-4 py-3 border-t bg-slate-50 shrink-0">
+            <button
+              onClick={handleExport}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-slate-900 text-white text-sm rounded hover:bg-slate-800"
+            >
+              <Download className="w-4 h-4" />
+              导出 PNG
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

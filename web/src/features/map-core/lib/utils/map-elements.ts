@@ -3,8 +3,10 @@
  * This project is licensed under the MIT License - see the LICENSE file in the project root for details.
  */
 
-import { MapElementConfig, NorthArrowConfig, NorthArrowStyle, LegendConfig, TiandituConfig } from '../types/export-state';
-import { BASEMAP_BRAND } from '../constants/brand';
+import { MapElementConfig, NorthArrowConfig, NorthArrowStyle, LegendConfig, TiandituConfig, BrandConfig } from '../types/export-state';
+import { PROJECT_BRAND } from '../constants/brand';
+// 审图号文字已移除（只保留 logo 图片），如需恢复取消下一行注释
+// import { BASEMAP_BRAND } from '../constants/brand';
 
 // Import SVG files as raw strings (Vite feature)
 import northArrowSvg1 from '../assets/north-arrow-1.svg?raw';
@@ -69,6 +71,10 @@ export async function loadTiandituLogo(): Promise<HTMLImageElement> {
     image.onerror = () => reject(new Error('Failed to load Tianditu logo'));
     image.src = tiandituLogoUrl;
   });
+  // Fully decode before returning: onload only means the bytes were fetched. A
+  // detached <img> that hasn't decoded yet can draw blank on a canvas — which is
+  // why the logo appeared in the on-screen <img> but went missing in exports.
+  await image.decode();
 
   tiandituLogoImage = image;
   return image;
@@ -137,6 +143,43 @@ export function drawTitle(
   // Draw text
   ctx.fillStyle = '#1e293b';
   ctx.fillText(text, position.x, position.y + 20); // Baseline adjustment
+
+  ctx.restore();
+}
+
+/**
+ * Draw the SpaceMV-CoAI-Map brand watermark (text logo)
+ */
+export function drawBrand(
+  ctx: CanvasRenderingContext2D,
+  config: BrandConfig,
+  canvasWidth: number,
+  canvasHeight: number
+): void {
+  if (!config.enabled) return;
+
+  ctx.save();
+
+  const text = config.text || PROJECT_BRAND.name;
+  const fontSize = 13;
+  const padding = 6;
+
+  ctx.font = `600 ${fontSize}px sans-serif`;
+  const textWidth = ctx.measureText(text).width;
+  const elementWidth = textWidth + padding * 2;
+  const elementHeight = fontSize + padding * 2;
+
+  const position = getElementPosition(config, canvasWidth, canvasHeight, elementWidth, elementHeight);
+
+  // Background pill
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+  ctx.fillRect(position.x, position.y, elementWidth, elementHeight);
+
+  // Text
+  ctx.fillStyle = '#1e293b';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, position.x + padding, position.y + elementHeight / 2);
 
   ctx.restore();
 }
@@ -223,9 +266,13 @@ export function drawScaleBar(
   const maxGroundDistanceMeters = maxBarLength * metersPerPixel;
   const maxGroundDistanceKm = maxGroundDistanceMeters / 1000;
 
-  // Round to nice values
-  const niceValues = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100];
-  let displayDistance = niceValues.find(v => v >= maxGroundDistanceKm * 0.5) || maxGroundDistanceKm;
+  // Snap to a round "nice" value (1-2-5 series) so the bar reads as a clean
+  // reference, not a precise measurement — a scale bar should never show
+  // "353.1652... km". Covers ~10 m up to ~10000 km: past the useful range of a
+  // 100 px bar even at a full-globe (zoom 0) view, so the raw fallback never
+  // leaks an unrounded distance.
+  const niceValues = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
+  const displayDistance = niceValues.find((v) => v >= maxGroundDistanceKm * 0.5) || maxGroundDistanceKm;
 
   // Calculate actual pixel length for this display distance
   const pixelLength = Math.min(displayDistance * 1000 / metersPerPixel, maxBarLength);
@@ -404,16 +451,23 @@ export function drawTianditu(
   ctx.save();
 
   const logoHeight = 20;
-  const logoWidth = logoImage ? (logoImage.width / logoImage.height) * logoHeight : 20;
-  const fontSize = 10;
+  // naturalWidth/Height give the intrinsic dims reliably for a detached <img>;
+  // the .width/.height IDL attrs are unreliable (0 in some engines) for images
+  // that aren't being rendered.
+  const logoWidth = logoImage && logoImage.naturalHeight
+    ? (logoImage.naturalWidth / logoImage.naturalHeight) * logoHeight
+    : 20;
   const padding = 6;
-  const gap = 4;
 
-  ctx.font = `${fontSize}px sans-serif`;
-  const licenseText = BASEMAP_BRAND.tianditu.license;
-  const textWidth = ctx.measureText(licenseText).width;
+  // 审图号文字已移除，只保留 logo 图片（如需恢复取消下方注释）
+  // const fontSize = 10;
+  // const gap = 4;
+  // ctx.font = `${fontSize}px sans-serif`;
+  // const licenseText = BASEMAP_BRAND.tianditu.license;
+  // const textWidth = ctx.measureText(licenseText).width;
+  // const elementWidth = logoWidth + gap + textWidth + padding * 2;
 
-  const elementWidth = logoWidth + gap + textWidth + padding * 2;
+  const elementWidth = logoWidth + padding * 2;
   const elementHeight = logoHeight + padding * 2;
 
   const position = getElementPosition(config, canvasWidth, canvasHeight, elementWidth, elementHeight);
@@ -427,11 +481,11 @@ export function drawTianditu(
     ctx.drawImage(logoImage, position.x + padding, position.y + padding, logoWidth, logoHeight);
   }
 
-  // Draw license text
-  ctx.fillStyle = '#1e293b';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(licenseText, position.x + padding + logoWidth + gap, position.y + elementHeight / 2);
+  // Draw license text (审图号) — 已移除，只保留 logo
+  // ctx.fillStyle = '#1e293b';
+  // ctx.textAlign = 'left';
+  // ctx.textBaseline = 'middle';
+  // ctx.fillText(licenseText, position.x + padding + logoWidth + gap, position.y + elementHeight / 2);
 
   ctx.restore();
 }

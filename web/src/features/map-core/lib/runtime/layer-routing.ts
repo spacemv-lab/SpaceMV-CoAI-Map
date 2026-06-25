@@ -5,10 +5,12 @@
 
 import { getStyleConfig } from '../constants/style-config';
 import {
+  AttributeFieldType,
   ComplexityLevel,
   DataResidency,
   DeviceClass,
   GeometryType,
+  LayerFieldDefinition,
   LayerRoutingMetadata,
   LayerRuntimeRoute,
   LayerState,
@@ -29,6 +31,13 @@ export interface DatasetRoutingSummary {
   complexityScore?: number;
   geojsonUrl?: string;
   mvtUrlTemplate?: string;
+  /**
+   * Dataset field definitions, returned by GET /datasets (list) and
+   * GET /datasets/:id. Carried into LayerState so the label/attribute panels
+   * have fields immediately on add — without this, fields only appear after a
+   * project reload (server-side getProjectState enrichment).
+   */
+  fields?: Array<{ name: string; alias?: string; type: string }>;
 }
 
 interface LayerRoutingInput {
@@ -139,6 +148,59 @@ export function toLayerRoutingMetadata(
   };
 }
 
+/**
+ * Coerce a backend field-type string into the frontend AttributeFieldType.
+ * The field pickers only use `type` for display, so a coarse category is
+ * enough; anything unrecognized falls back to 'unknown'.
+ */
+function coerceFieldType(raw?: string): AttributeFieldType {
+  switch ((raw || '').toLowerCase()) {
+    case 'string':
+    case 'text':
+    case 'varchar':
+    case 'char':
+      return 'string';
+    case 'number':
+    case 'integer':
+    case 'int':
+    case 'float':
+    case 'double':
+    case 'decimal':
+    case 'real':
+    case 'long':
+      return 'number';
+    case 'boolean':
+    case 'bool':
+      return 'boolean';
+    case 'date':
+    case 'datetime':
+    case 'timestamp':
+      return 'date';
+    default:
+      return 'unknown';
+  }
+}
+
+/**
+ * Map backend dataset field definitions into the store's LayerFieldDefinition.
+ * Returns undefined when the dataset carries no fields so the layer keeps the
+ * default (empty) field list and normalizeLayerFields can still infer from data
+ * later if it ever gets loaded.
+ */
+function toLayerFields(
+  dataset: DatasetRoutingSummary,
+): LayerFieldDefinition[] | undefined {
+  if (!dataset.fields || dataset.fields.length === 0) return undefined;
+  return dataset.fields.map((field) => ({
+    name: field.name,
+    alias: field.alias || field.name,
+    type: coerceFieldType(field.type),
+    nullable: true,
+    indexed: false,
+    remark: '',
+  }));
+}
+
 export function createLayerFromDataset(
   dataset: DatasetRoutingSummary,
   sceneType: SceneType = 'browse',
@@ -169,5 +231,6 @@ export function createLayerFromDataset(
     runtimeRoute,
     data: undefined,
     dataSource: undefined,
+    fields: toLayerFields(dataset),
   };
 }

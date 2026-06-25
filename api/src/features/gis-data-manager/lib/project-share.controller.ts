@@ -32,6 +32,19 @@ export class ProjectShareController {
     return success(await this.shareService.createShare(id, body));
   }
 
+  /**
+   * 幂等获取项目的嵌入 token（供外部平台嵌入地图）：
+   * 有活跃 embed token 则返回，否则自动生成。一个项目一个稳定 token。
+   */
+  @Post('projects/:id/embed-token')
+  async getOrCreateEmbedToken(
+    @Param('id') id: string,
+    @CurrentUserData() user: CurrentUser,
+  ) {
+    await this.shareService.assertOwnership(id, user.userId);
+    return success(await this.shareService.getOrCreateEmbedToken(id));
+  }
+
   @Get('projects/:id/shares')
   async listShares(
     @Param('id') id: string,

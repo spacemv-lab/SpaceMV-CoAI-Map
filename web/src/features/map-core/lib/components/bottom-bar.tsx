@@ -53,8 +53,12 @@ export function BottomBar() {
   return (
     <div className="flex items-center gap-4">
       <div className="figure-number flex items-center gap-1">
-        <img src={tiandtMapLogo} alt={BASEMAP_BRAND.tianditu.name} />
-        {BASEMAP_BRAND.tianditu.license}
+        <img
+          src={tiandtMapLogo}
+          alt={BASEMAP_BRAND.tianditu.name}
+          className="h-5 w-auto"
+        />
+        {/* 审图号文字已移除，只保留 logo: {BASEMAP_BRAND.tianditu.license} */}
       </div>
 
       <div className="bg-white/90 backdrop-blur rounded-lg shadow-lg border px-3 py-1 text-xs text-gray-600 flex items-center gap-4">

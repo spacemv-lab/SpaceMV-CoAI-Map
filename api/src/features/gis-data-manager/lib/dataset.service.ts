@@ -10,10 +10,12 @@ import {
   OnModuleDestroy,
   Logger,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaClient, Dataset, DatasetVersion, Prisma, IngestStatus, ProjectState } from '@prisma/client';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 import { DatasetComplexityLevel } from '../dto';
 import { ViewportState, LayerState } from '../dto/project.dto';
 
@@ -1037,6 +1039,173 @@ export class DatasetService
     return { success: true, affected: result };
   }
 
+  /** 仅更新要素属性（不动几何）；properties 为整份替换 */
+  async updateFeatureProperties(
+    datasetId: string,
+    featureId: string,
+    properties: Record<string, unknown>,
+  ) {
+    const versionId = await this.resolveCurrentVersionId(this, datasetId);
+    const result = await this.$executeRaw`
+      UPDATE "GisFeature"
+      SET properties = ${properties as Prisma.JsonObject}
+      WHERE "versionId" = ${versionId} AND id = ${featureId}
+    `;
+    if (result === 0) {
+      throw new NotFoundException(
+        `Feature ${featureId} not found in dataset ${datasetId}`,
+      );
+    }
+    return { success: true, affected: result };
+  }
+
+  /** 往已有数据集当前版本新增单个要素（绘制入已保存图层用） */
+  async createFeature(
+    datasetId: string,
+    data: {
+      id?: string;
+      geometry: Record<string, unknown>;
+      properties?: Record<string, unknown>;
+    },
+  ) {
+    const versionId = await this.resolveCurrentVersionId(this, datasetId);
+    const featureId = data.id?.trim() || randomUUID();
+    const wkt = geojsonToWKT(data.geometry);
+    await this.$executeRaw`
+      INSERT INTO "GisFeature" (id, "versionId", properties, geometry)
+      VALUES (
+        ${featureId},
+        ${versionId},
+        ${data.properties ?? ({} as Prisma.JsonObject)},
+        ST_GeomFromText(${wkt}, 4326)
+      )
+    `;
+    return { featureId };
+  }
+
+  /** 解析数据集当前版本 id（事务内传 tx，事务外传 this） */
+  private async resolveCurrentVersionId(
+    client: Pick<PrismaClient, 'dataset'>,
+    datasetId: string,
+  ): Promise<string> {
+    const dataset = await client.dataset.findUnique({
+      where: { id: datasetId },
+      select: { currentVersionId: true },
+    });
+    if (!dataset?.currentVersionId) {
+      throw new NotFoundException(
+        `Dataset ${datasetId} not found or has no current version`,
+      );
+    }
+    return dataset.currentVersionId;
+  }
+
+  /** 新增字段：写 DatasetField + 给当前版本所有要素补默认值（不覆盖已有 key） */
+  async addDatasetField(
+    datasetId: string,
+    field: {
+      name: string;
+      alias?: string;
+      type?: string;
+      nullable?: boolean;
+      defaultValue?: unknown;
+    },
+  ) {
+    const name = field.name.trim();
+    if (!name) {
+      throw new BadRequestException('字段名不能为空');
+    }
+    return this.$transaction(async (tx) => {
+      try {
+        await tx.datasetField.create({
+          data: {
+            datasetId,
+            name,
+            alias: field.alias?.trim() || name,
+            type: field.type || 'string',
+            nullable: field.nullable ?? true,
+          },
+        });
+      } catch {
+        throw new BadRequestException(`字段 "${name}" 已存在`);
+      }
+      const versionId = await this.resolveCurrentVersionId(tx, datasetId);
+      const defaultValue = field.defaultValue ?? null;
+      await tx.$executeRaw`
+        UPDATE "GisFeature"
+        SET properties = properties || jsonb_build_object(${name}, ${defaultValue}::jsonb)
+        WHERE "versionId" = ${versionId}
+          AND NOT (properties ? ${name})
+      `;
+      return { datasetId, name };
+    });
+  }
+
+  /** 更新字段（别名/类型/可空；改名时同步所有要素 properties 的 key） */
+  async updateDatasetField(
+    datasetId: string,
+    fieldName: string,
+    updates: {
+      name?: string;
+      alias?: string;
+      type?: string;
+      nullable?: boolean;
+    },
+  ) {
+    return this.$transaction(async (tx) => {
+      const existing = await tx.datasetField.findFirst({
+        where: { datasetId, name: fieldName },
+      });
+      if (!existing) {
+        throw new NotFoundException(`字段 "${fieldName}" 不存在`);
+      }
+      const newName = updates.name?.trim() || existing.name;
+      await tx.datasetField.update({
+        where: { id: existing.id },
+        data: {
+          name: newName,
+          alias:
+            updates.alias !== undefined
+              ? updates.alias?.trim() || newName
+              : existing.alias,
+          type: updates.type ?? existing.type,
+          nullable: updates.nullable ?? existing.nullable,
+        },
+      });
+      if (newName !== existing.name) {
+        const versionId = await this.resolveCurrentVersionId(tx, datasetId);
+        await tx.$executeRaw`
+          UPDATE "GisFeature"
+          SET properties =
+            (properties - ${existing.name})
+            || jsonb_build_object(${newName}, properties -> ${existing.name})
+          WHERE "versionId" = ${versionId}
+        `;
+      }
+      return { datasetId, name: newName };
+    });
+  }
+
+  /** 删除字段：删 DatasetField + 移除所有要素 properties 的对应 key */
+  async removeDatasetField(datasetId: string, fieldName: string) {
+    return this.$transaction(async (tx) => {
+      const existing = await tx.datasetField.findFirst({
+        where: { datasetId, name: fieldName },
+      });
+      if (!existing) {
+        throw new NotFoundException(`字段 "${fieldName}" 不存在`);
+      }
+      await tx.datasetField.delete({ where: { id: existing.id } });
+      const versionId = await this.resolveCurrentVersionId(tx, datasetId);
+      await tx.$executeRaw`
+        UPDATE "GisFeature"
+        SET properties = properties - ${fieldName}
+        WHERE "versionId" = ${versionId}
+      `;
+      return { datasetId, name: fieldName };
+    });
+  }
+
   async deleteFeature(
     datasetId: string,
     featureId: string,
@@ -1070,14 +1239,19 @@ export class DatasetService
     // 2. geometry should be EPSG:4326 (from GeoJSON import), transform to 3857 for MVT
     // 3. ST_SetSRID ensures correct coordinate transformation
     // 4. ST_AsMVT(schema, name, extent, geom_column_name, id_column_name)
-    // 5. MVT id must be bigint (uint64). Since GisFeature.id is UUID,
-    //    we use ROW_NUMBER() to generate a numeric id for MVT,
-    //    and keep the original UUID in properties.
+    // 5. MVT id must be a positive integer. GisFeature.id is a UUID (not an
+    //    integer), so derive a STABLE integer id from it: MapLibre dedupes a
+    //    feature's label across tiles by (layer, id), so the same polygon must
+    //    get the SAME id in every tile. ROW_NUMBER() was per-tile-sequential,
+    //    which made a large polygon that spans several tiles render one label
+    //    per tile. A 53-bit hash of the UUID text is stable across tiles and
+    //    stays within JS's safe-integer range (2^53), so the cross-tile dedup
+    //    pairs the instances up -> one label per feature.
     const result = await this.$queryRaw`
       SELECT ST_AsMVT(tile, 'features', 4096, 'geom', 'mvt_id') as mvt
       FROM (
         SELECT
-          ROW_NUMBER() OVER() as mvt_id,
+          (hashtextextended(id::text, 0) & 9007199254740991) as mvt_id,
           id as feature_id,
           properties,
           ST_AsMVTGeom(

@@ -6,7 +6,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useMapStore } from '../../store/use-map-store';
-import { drawTitle, drawNorthArrow, drawScaleBar, drawLegend, drawTianditu, loadNorthArrowSvg, loadTiandituLogo } from '../../utils/map-elements';
+import { drawTitle, drawNorthArrow, drawScaleBar, drawLegend, drawTianditu, drawBrand, loadNorthArrowSvg, loadTiandituLogo } from '../../utils/map-elements';
 import { NorthArrowStyle } from '../../types/export-state';
 
 // Preload all north arrow SVG styles
@@ -93,6 +93,7 @@ export function ExportPreviewCanvas() {
 
     // Draw Tianditu attribution
     drawTianditu(ctx, config.tianditu, width, height, tiandituLogoCache);
+    drawBrand(ctx, config.brand, width, height);
 
     ctx.restore();
   }, [config, viewport, layers]);

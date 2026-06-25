@@ -3,6 +3,8 @@
  * This project is licensed under the MIT License - see the LICENSE file in the project root for details.
  */
 
+import { PROJECT_BRAND } from '../constants/brand';
+
 /**
  * Map element preset positions
  */
@@ -51,6 +53,13 @@ export interface TiandituConfig extends MapElementConfig {
 }
 
 /**
+ * Brand watermark configuration (SpaceMV-CoAI-Map text logo)
+ */
+export interface BrandConfig extends MapElementConfig {
+  text: string;
+}
+
+/**
  * Export panel configuration
  */
 export interface ExportConfig {
@@ -59,6 +68,7 @@ export interface ExportConfig {
   scaleBar: MapElementConfig;
   legend: LegendConfig;
   tianditu: TiandituConfig;
+  brand: BrandConfig;
 }
 
 /**
@@ -73,7 +83,12 @@ export interface ExportPanelState {
     endY: number;
   } | null;
   config: ExportConfig;
+  /** Export pixel dimensions = selection box (CSS px) × devicePixelRatio. Null until a box is drawn. */
   pixelSize: { width: number; height: number } | null;
+  /** Locked aspect ratio (width / height). null = free (no constraint). e.g. 1, 4/3, 16/9. */
+  aspectRatio: number | null;
+  /** CSS pixel size of the map container; used to clamp/rescale the selection box. */
+  containerSize: { width: number; height: number } | null;
 }
 
 /**
@@ -130,8 +145,20 @@ export const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   },
   tianditu: {
     enabled: true,
-    preset: 'bottom-left',
-    offsetX: -40,
+    // Distinct from scaleBar (bottom-left): the two defaulting to the same anchor
+    // made them stack into one unreadable blob. Bottom-center is otherwise free
+    // (title=top-center, scaleBar=bottom-left, legend=bottom-right).
+    preset: 'bottom-center',
+    offsetX: 0,
     offsetY: 40,
+  },
+  brand: {
+    enabled: true,
+    text: PROJECT_BRAND.name,
+    // Top-left is the only free corner (title=top-center, northArrow=top-right,
+    // scaleBar=bottom-left, legend=bottom-right, tianditu=bottom-center).
+    preset: 'top-left',
+    offsetX: -40,
+    offsetY: -40,
   },
 };

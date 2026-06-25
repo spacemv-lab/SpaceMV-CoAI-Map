@@ -9,6 +9,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Param,
   Query,
@@ -165,6 +166,20 @@ export class DatasetController {
       pageSize: pageSize || 50,
       search,
     });
+    return success(result);
+  }
+
+  /** 往已有数据集当前版本新增单个要素（绘制入已保存图层） */
+  @Post(':id/features')
+  async createFeature(
+    @Param('id') id: string,
+    @Body() body: {
+      geometry: Record<string, unknown>;
+      properties?: Record<string, unknown>;
+      id?: string;
+    },
+  ) {
+    const result = await this.datasetService.createFeature(id, body);
     return success(result);
   }
 
@@ -488,6 +503,68 @@ export class DatasetController {
         `Feature ${featureId} not found in dataset ${id}`,
       );
     }
+  }
+
+  /** 仅更新要素属性（不动几何），供属性表单元格编辑使用 */
+  @Patch(':id/features/:featureId/properties')
+  async updateFeatureProperties(
+    @Param('id') id: string,
+    @Param('featureId') featureId: string,
+    @Body() body: { properties: Record<string, unknown> },
+  ) {
+    const result = await this.datasetService.updateFeatureProperties(
+      id,
+      featureId,
+      body.properties,
+    );
+    return success(result);
+  }
+
+  // ============================================
+  // Dataset Fields (schema CRUD)
+  // ============================================
+
+  @Post(':id/fields')
+  async addField(
+    @Param('id') id: string,
+    @Body() body: {
+      name: string;
+      alias?: string;
+      type?: string;
+      nullable?: boolean;
+      defaultValue?: unknown;
+    },
+  ) {
+    const result = await this.datasetService.addDatasetField(id, body);
+    return success(result);
+  }
+
+  @Patch(':id/fields/:fieldName')
+  async updateField(
+    @Param('id') id: string,
+    @Param('fieldName') fieldName: string,
+    @Body() body: {
+      name?: string;
+      alias?: string;
+      type?: string;
+      nullable?: boolean;
+    },
+  ) {
+    const result = await this.datasetService.updateDatasetField(
+      id,
+      fieldName,
+      body,
+    );
+    return success(result);
+  }
+
+  @Delete(':id/fields/:fieldName')
+  async removeField(
+    @Param('id') id: string,
+    @Param('fieldName') fieldName: string,
+  ) {
+    const result = await this.datasetService.removeDatasetField(id, fieldName);
+    return success(result);
   }
 
   // ============================================

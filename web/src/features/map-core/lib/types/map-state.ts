@@ -5,7 +5,7 @@
 
 import { ExportPanelState } from './export-state';
 import { RenderingType, GraduatedConfig } from './graduated-style';
-import { LabelPosition } from './label-position';
+import { LabelPosition, PointLabelPosition } from './label-position';
 
 /**
  * 几何类型枚举
@@ -16,7 +16,7 @@ export type GeometryType = 'POINT' | 'LINESTRING' | 'POLYGON';
 /**
  * 右侧多功能面板的 tab 类型
  */
-export type RightPanelTab = 'ai' | 'attributes' | 'style' | 'label';
+export type RightPanelTab = 'ai' | 'attributes' | 'style' | 'label' | 'export';
 
 export type ComplexityLevel = 'XS' | 'S' | 'M' | 'L' | 'XL';
 
@@ -76,6 +76,12 @@ export interface LabelStyle {
   offsetY?: number; // Y轴偏移（像素，点/面要素专用，负值上，正值下）
   fontSize?: number; // 字号（px，默认 14）
   padding?: number; // 标注间最小间距（像素，默认 2）
+
+  // === 面要素标注放置（POLYGON 专用） ===
+  placementMode?: 'auto' | 'fixed'; // 放置模式：auto=自动寻位(variable-anchor)，fixed=固定锚点；缺省 auto
+  anchorCandidates?: PointLabelPosition[]; // auto 模式候选锚点（缺省=九宫格全选）
+  radialOffset?: number; // auto 模式径向偏移（em，默认 1）
+  allowOverlap?: boolean; // 是否允许标注重叠（默认 false，重叠时自动隐藏）
 
   // === 现有字段（保留兼容） ===
   text?: string; // 标注文字（向后兼容，优先使用 expression）
@@ -292,6 +298,8 @@ export type MapStateSchema = {
   };
   viewerReady: boolean;
   legendVisible: boolean;
+  /** 属性表拖拽中：map-area 据此在拖拽时关闭图例的过渡，使其跟手不缓动 */
+  isPanelResizing: boolean;
   /**
    * 只读模式：公开分享页(/share/:token)设为 true。
    * 为 true 时，store 的所有自动写入(autosave /style、beforeunload PUT /state)一律跳过，

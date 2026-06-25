@@ -7,24 +7,25 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMapStore } from '../../store/use-map-store';
 import {
   CheckSquare,
-  LocateFixed,
-  PencilLine,
-  Square,
-  Trash2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  Filter,
+  ListChecks,
+  LocateFixed,
+  Search,
+  Square,
+  Trash2,
 } from 'lucide-react';
-import {
-  fetchFeaturesList,
-  FeatureRow,
-  FeaturesListResponse,
-} from '../../api/dataset-api';
+import { toast } from 'sonner';
+import { fetchFeaturesList, FeatureRow } from '../../api/dataset-api';
+import { fetchFeatureGeoJSON, updateFeatureProperties } from '@/features/gis-data-manager/feature-api';
+import { flyToGeometry } from '../../utils/fly-to-feature';
+import { FilterBar } from './filter-bar';
 
 interface AttributeTableProps {
   layerId: string;
-  selectedFeatureIds: Set<string>;
-  onSelectionChange: (ids: Set<string>) => void;
-  filterFn?: ((feature: any) => boolean) | null;
 }
 
 interface EditingCell {
@@ -43,12 +44,43 @@ interface ApiFetchState {
   error: string | null;
 }
 
-export function AttributeTable({
-  layerId,
-  selectedFeatureIds,
-  onSelectionChange,
-  filterFn,
-}: AttributeTableProps) {
+type SortDirection = 'asc' | 'desc';
+interface SortState {
+  field: string | null; // '__id' 表示按要素ID排序
+  direction: SortDirection;
+}
+
+const isEmpty = (value: unknown) =>
+  value === null || value === undefined || value === '';
+
+/** 数值按数值比、其余按字符串 localeCompare；调用方负责把空值挪到末尾 */
+function compareValues(a: unknown, b: unknown): number {
+  const aNum = Number(a);
+  const bNum = Number(b);
+  if (!Number.isNaN(aNum) && !Number.isNaN(bNum)) {
+    return aNum - bNum;
+  }
+  return String(a).localeCompare(String(b));
+}
+
+/** 单要素排序比较：空值恒在末尾，再按方向正/反 */
+function compareFeatures(
+  a: { id: string; properties?: Record<string, unknown> },
+  b: { id: string; properties?: Record<string, unknown> },
+  sort: { field: string; direction: SortDirection },
+): number {
+  const av = sort.field === '__id' ? a.id : a.properties?.[sort.field];
+  const bv = sort.field === '__id' ? b.id : b.properties?.[sort.field];
+  const aEmpty = isEmpty(av);
+  const bEmpty = isEmpty(bv);
+  if (aEmpty !== bEmpty) {
+    return aEmpty ? 1 : -1; // 空值始终排末尾，不受升降序影响
+  }
+  const base = compareValues(av, bv);
+  return sort.direction === 'asc' ? base : -base;
+}
+
+export function AttributeTable({ layerId }: AttributeTableProps) {
   const layers = useMapStore((state) => state.layers);
   const selection = useMapStore((state) => state.selection);
   const setSelection = useMapStore((state) => state.setSelection);
@@ -57,6 +89,11 @@ export function AttributeTable({
 
   const [searchTerm, setSearchTerm] = useState('');
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
+  const [selectedFeatureIds, setSelectedFeatureIds] = useState<Set<string>>(new Set());
+  const [filterFn, setFilterFn] = useState<((feature: any) => boolean) | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [sort, setSort] = useState<SortState>({ field: null, direction: 'asc' });
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
 
   // API 数据源状态（用于 MVT 瓦片图层）
@@ -111,39 +148,76 @@ export function AttributeTable({
     }
   };
 
-  // 统一数据源（本地或 API）
-  const displayFeatures = useMemo(() => {
-    if (hasLocalData) {
-      // 本地数据：应用搜索过滤
-      const features = layer?.data?.features || [];
-      const keyword = searchTerm.trim().toLowerCase();
+  // 切图层时重置本地态
+  useEffect(() => {
+    setSelectedFeatureIds(new Set());
+    setFilterFn(null);
+    setFilterOpen(false);
+    setEditingCell(null);
+    setSort({ field: null, direction: 'asc' });
+    setShowSelectedOnly(false);
+  }, [layerId]);
 
-      return features.filter((feature) => {
-        if (filterFn && !filterFn(feature)) {
-          return false;
-        }
-
-        if (!keyword) {
-          return true;
-        }
-
-        return Object.values(feature.properties || {}).some((value) =>
-          String(value ?? '').toLowerCase().includes(keyword),
-        );
-      });
-    } else {
-      // API 数据：直接使用（搜索需后端支持，暂未实现）
-      return apiState.rows.map((row) => ({
-        id: row.id,
-        properties: row.properties,
-        geometry: null,
-      }));
+  // 选中清空时自动关闭"仅显示选中"，避免显示空表
+  useEffect(() => {
+    if (selectedFeatureIds.size === 0) {
+      setShowSelectedOnly(false);
     }
-  }, [hasLocalData, layer?.data?.features, searchTerm, filterFn, apiState.rows]);
+  }, [selectedFeatureIds]);
+
+  // 统一数据源（本地或 API），仅显示选中 / 筛选 / 搜索 / 排序 一视同仁
+  // 注：API/MVT 图层为分页加载，这些操作作用于“当前已加载页”，全量需服务端支持
+  const displayFeatures = useMemo(() => {
+    // 本地 = 图层要素（带几何）；API/MVT = 当前页 rows（无几何）
+    const sourceRows = hasLocalData
+      ? (layer?.data?.features ?? [])
+      : apiState.rows.map((row) => ({
+          id: row.id,
+          properties: row.properties,
+          geometry: null,
+        }));
+
+    const keyword = searchTerm.trim().toLowerCase();
+
+    const filtered = sourceRows.filter((feature) => {
+      if (showSelectedOnly && !selectedFeatureIds.has(feature.id)) {
+        return false;
+      }
+      if (filterFn && !filterFn(feature)) {
+        return false;
+      }
+      if (!keyword) {
+        return true;
+      }
+      return Object.values(feature.properties || {}).some((value) =>
+        String(value ?? '').toLowerCase().includes(keyword),
+      );
+    });
+
+    if (!sort.field) {
+      return filtered;
+    }
+    return [...filtered].sort((a, b) =>
+      compareFeatures(a, b, { field: sort.field, direction: sort.direction }),
+    );
+  }, [
+    hasLocalData,
+    layer?.data?.features,
+    apiState.rows,
+    searchTerm,
+    filterFn,
+    showSelectedOnly,
+    selectedFeatureIds,
+    sort,
+  ]);
 
   const totalCount = hasLocalData
-    ? (layer?.data?.features?.length || 0)
+    ? layer?.data?.features?.length || 0
     : apiState.total;
+
+  const filterActive = filterFn !== null;
+  const isFiltering =
+    filterActive || searchTerm.trim().length > 0 || showSelectedOnly;
 
   useEffect(() => {
     if (selection?.layerId !== layerId || !selection.featureId) {
@@ -158,91 +232,240 @@ export function AttributeTable({
 
   const handleToggleAll = () => {
     if (selectedFeatureIds.size === displayFeatures.length) {
-      onSelectionChange(new Set());
+      setSelectedFeatureIds(new Set());
       return;
     }
-
-    onSelectionChange(new Set(displayFeatures.map((feature) => feature.id)));
+    setSelectedFeatureIds(new Set(displayFeatures.map((feature) => feature.id)));
   };
 
   const handleToggleFeature = (featureId: string) => {
-    const next = new Set(selectedFeatureIds);
-    if (next.has(featureId)) {
-      next.delete(featureId);
-    } else {
-      next.add(featureId);
-    }
-    onSelectionChange(next);
+    setSelectedFeatureIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(featureId)) {
+        next.delete(featureId);
+      } else {
+        next.add(featureId);
+      }
+      return next;
+    });
   };
 
-  const handleSaveCell = () => {
-    if (!editingCell) {
+  const handleSaveCell = async () => {
+    const cell = editingCell;
+    if (!cell) {
       return;
     }
-
-    updateLayerFeature(layerId, editingCell.featureId, {
-      [editingCell.fieldName]: editingCell.value,
-    });
+    // 立即清空，避免 Enter + blur 双触发重复保存
     setEditingCell(null);
+
+    const { featureId, fieldName, value } = cell;
+    if (datasetId) {
+      // API/MVT 图层：合并单元格进整份 properties → 写后端 → 更新本地页数据
+      const row = apiState.rows.find((item) => item.id === featureId);
+      const merged = { ...(row?.properties || {}), [fieldName]: value };
+      try {
+        await updateFeatureProperties(datasetId, featureId, merged);
+        setApiState((s) => ({
+          ...s,
+          rows: s.rows.map((item) =>
+            item.id === featureId ? { ...item, properties: merged } : item,
+          ),
+        }));
+      } catch {
+        toast.error('保存失败，请重试');
+      }
+    } else {
+      // 本地图层：直接改 store
+      updateLayerFeature(layerId, featureId, { [fieldName]: value });
+    }
+  };
+
+  // 点表头切换排序：同列升降序切换，换列从升序开始
+  const handleSortClick = (field: string) => {
+    setSort((prev) =>
+      prev.field === field
+        ? { field, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+        : { field, direction: 'asc' },
+    );
+  };
+
+  // 把 filter 函数正确地存进 state（避免 React 把它当 updater 调用）；null 表示无筛选
+  const handleFilterChange = (fn: ((feature: any) => boolean) | null) => {
+    setFilterFn(fn === null ? null : () => fn);
+  };
+
+  // 定位到要素：本地有几何直接飞；API/MVT 行无几何 → 按 featureId 向后端取完整几何再飞
+  const handleLocate = (feature: {
+    id: string;
+    properties?: Record<string, unknown>;
+    geometry?: unknown;
+  }) => {
+    setSelection({
+      layerId,
+      featureId: feature.id,
+      properties: feature.properties || {},
+    });
+    if (feature.geometry) {
+      flyToGeometry(feature.geometry);
+      return;
+    }
+    if (!datasetId) {
+      toast.warning('该要素无几何信息，无法定位');
+      return;
+    }
+    fetchFeatureGeoJSON(datasetId, feature.id)
+      .then((geo) => {
+        if (geo?.geometry) {
+          flyToGeometry(geo.geometry);
+        } else {
+          toast.warning('该要素无几何信息，无法定位');
+        }
+      })
+      .catch(() => toast.warning('该要素无几何信息，无法定位'));
   };
 
   if (!layer) {
     return null;
   }
 
+  const allSelected =
+    displayFeatures.length > 0 && selectedFeatureIds.size === displayFeatures.length;
+
+  const renderSortIcon = (field: string) =>
+    sort.field === field &&
+    (sort.direction === 'asc' ? (
+      <ChevronUp className="h-3 w-3" />
+    ) : (
+      <ChevronDown className="h-3 w-3" />
+    ));
+
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b bg-slate-50 px-3 py-2">
-        <input
-          type="text"
-          placeholder="搜索属性值..."
-          value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
-          className="w-full rounded-md border border-slate-200 px-3 py-1.5 text-sm outline-none focus:border-slate-500"
-        />
+      {/* 单一工具条：搜索 + 筛选 popover + 仅显示选中 + 选中删除 */}
+      <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            placeholder="搜索属性值..."
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            className="w-full rounded-md border border-slate-200 py-1.5 pl-8 pr-3 text-sm outline-none focus:border-slate-400"
+          />
+        </div>
+
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setFilterOpen((value) => !value)}
+            className={`relative inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors ${
+              filterActive
+                ? 'border-blue-300 bg-blue-50 text-blue-700'
+                : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+            title="结构化筛选"
+          >
+            <Filter className="h-3.5 w-3.5" />
+            筛选
+            {filterActive && (
+              <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border border-white bg-blue-500" />
+            )}
+          </button>
+
+          {filterOpen && (
+            <>
+              {/* 点击外部关闭 */}
+              <div
+                className="fixed inset-0 z-30"
+                onClick={() => setFilterOpen(false)}
+              />
+              <div className="absolute bottom-full right-0 z-40 mb-2 max-h-[60vh] w-80 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl">
+                <FilterBar
+                  layerId={layerId}
+                  onFilterChange={handleFilterChange}
+                  onApplied={() => setFilterOpen(false)}
+                />
+              </div>
+            </>
+          )}
+        </div>
+
         {selectedFeatureIds.size > 0 && (
           <button
-            className="inline-flex items-center gap-1 rounded-md border border-rose-200 px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50"
+            type="button"
+            onClick={() => setShowSelectedOnly((value) => !value)}
+            className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs transition-colors ${
+              showSelectedOnly
+                ? 'border-blue-300 bg-blue-50 text-blue-700'
+                : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+            title="仅显示选中的要素"
+          >
+            <ListChecks className="h-3.5 w-3.5" />
+            仅显示选中
+          </button>
+        )}
+
+        {selectedFeatureIds.size > 0 && (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded-md border border-rose-200 px-2.5 py-1.5 text-xs text-rose-600 transition-colors hover:bg-rose-50"
             onClick={() =>
               deleteLayerFeatures(layerId, Array.from(selectedFeatureIds))
             }
+            title="删除选中要素"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            删除选中
+            删除选中({selectedFeatureIds.size})
           </button>
         )}
       </div>
 
+      {/* 表格 */}
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full min-w-max text-left text-sm">
-          <thead className="sticky top-0 z-10 bg-slate-100 text-xs uppercase text-slate-500">
-            <tr>
-              <th className="w-10 px-3 py-2">
-                <button onClick={handleToggleAll}>
-                  {displayFeatures.length > 0 &&
-                  selectedFeatureIds.size === displayFeatures.length ? (
-                    <CheckSquare className="h-4 w-4" />
+          <thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-500">
+            <tr className="border-b border-slate-200">
+              <th className="w-20 px-3 py-2">
+                <button type="button" onClick={handleToggleAll} title="全选/取消">
+                  {allSelected ? (
+                    <CheckSquare className="h-4 w-4 text-slate-600" />
                   ) : (
-                    <Square className="h-4 w-4" />
+                    <Square className="h-4 w-4 text-slate-400" />
                   )}
                 </button>
               </th>
-              <th className="w-28 px-3 py-2">要素ID</th>
+              <th className="w-24 px-3 py-2 font-medium">
+                <button
+                  type="button"
+                  className="flex items-center gap-1 text-slate-600 hover:text-slate-900"
+                  onClick={() => handleSortClick('__id')}
+                >
+                  要素ID
+                  {renderSortIcon('__id')}
+                </button>
+              </th>
               {fields.map((field) => (
-                <th key={field.name} className="min-w-[160px] px-3 py-2">
-                  <div className="flex flex-col">
-                    <span>{field.alias || field.name}</span>
-                    <span className="normal-case text-[10px] text-slate-400">
+                <th key={field.name} className="min-w-[140px] px-3 py-2 font-medium">
+                  <button
+                    type="button"
+                    className="flex flex-col text-left hover:text-slate-900"
+                    onClick={() => handleSortClick(field.name)}
+                  >
+                    <span className="flex items-center gap-1 text-slate-600">
+                      {field.alias || field.name}
+                      {renderSortIcon(field.name)}
+                    </span>
+                    <span className="text-[10px] font-normal text-slate-400">
                       {field.name}
                     </span>
-                  </div>
+                  </button>
                 </th>
               ))}
-              <th className="w-32 px-3 py-2">操作</th>
             </tr>
           </thead>
 
-          <tbody className="divide-y divide-slate-200 bg-white">
+          <tbody className="divide-y divide-slate-100">
             {displayFeatures.map((feature) => {
               const isSelected = selectedFeatureIds.has(feature.id);
               const isFocused =
@@ -254,9 +477,11 @@ export function AttributeTable({
                   ref={(node) => {
                     rowRefs.current[feature.id] = node;
                   }}
-                  className={`cursor-pointer hover:bg-slate-50 ${
-                    isSelected ? 'bg-blue-50' : ''
-                  } ${isFocused ? 'ring-2 ring-inset ring-emerald-500' : ''}`}
+                  className={`cursor-pointer ${
+                    isFocused ? 'ring-2 ring-inset ring-emerald-500' : ''
+                  } ${
+                    isSelected ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-slate-50'
+                  }`}
                   onClick={() =>
                     setSelection({
                       layerId,
@@ -265,22 +490,36 @@ export function AttributeTable({
                     })
                   }
                 >
-                  <td className="px-3 py-2">
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleToggleFeature(feature.id);
-                      }}
-                    >
-                      {isSelected ? (
-                        <CheckSquare className="h-4 w-4 text-blue-600" />
-                      ) : (
-                        <Square className="h-4 w-4 text-slate-400" />
-                      )}
-                    </button>
+                  <td className="px-3 py-1.5">
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleToggleFeature(feature.id);
+                        }}
+                      >
+                        {isSelected ? (
+                          <CheckSquare className="h-4 w-4 text-blue-600" />
+                        ) : (
+                          <Square className="h-4 w-4 text-slate-300" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                        title="定位到要素"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleLocate(feature);
+                        }}
+                      >
+                        <LocateFixed className="h-4 w-4" />
+                      </button>
+                    </div>
                   </td>
-                  <td className="px-3 py-2 font-mono text-xs text-slate-500">
-                    {feature.id.slice(0, 12)}
+                  <td className="px-3 py-1.5 font-mono text-xs text-slate-400">
+                    {feature.id.slice(0, 8)}
                   </td>
 
                   {fields.map((field) => {
@@ -292,7 +531,8 @@ export function AttributeTable({
                     return (
                       <td
                         key={cellKey}
-                        className="max-w-[240px] px-3 py-2 text-slate-700"
+                        title="双击编辑"
+                        className="max-w-[220px] cursor-text px-3 py-1.5 text-slate-700"
                         onDoubleClick={(event) => {
                           event.stopPropagation();
                           setEditingCell({
@@ -321,48 +561,17 @@ export function AttributeTable({
                                 setEditingCell(null);
                               }
                             }}
-                            className="w-full rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-slate-500"
+                            className="w-full rounded border border-slate-300 px-2 py-0.5 text-sm outline-none focus:border-slate-500"
                           />
                         ) : (
-                          <button className="flex w-full items-center gap-1 truncate text-left hover:text-slate-950">
-                            <PencilLine className="h-3 w-3 shrink-0 text-slate-300" />
-                            <span className="truncate">
-                              {String(feature.properties?.[field.name] ?? '') || '-'}
-                            </span>
-                          </button>
+                          <span className="block truncate">
+                            {String(feature.properties?.[field.name] ?? '') || '-'}
+                          </span>
                         )}
                       </td>
                     );
                   })}
 
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-1">
-                      <button
-                        className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                        title="定位到要素"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setSelection({
-                            layerId,
-                            featureId: feature.id,
-                            properties: feature.properties || {},
-                          });
-                        }}
-                      >
-                        <LocateFixed className="h-4 w-4" />
-                      </button>
-                      <button
-                        className="rounded p-1 text-rose-500 hover:bg-rose-50"
-                        title="删除要素"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          deleteLayerFeatures(layerId, [feature.id]);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
                 </tr>
               );
             })}
@@ -375,7 +584,6 @@ export function AttributeTable({
           </div>
         )}
 
-        {/* Loading 状态 */}
         {apiState.isLoading && (
           <div className="flex h-full min-h-40 items-center justify-center text-sm text-slate-500">
             加载中...
@@ -385,22 +593,24 @@ export function AttributeTable({
 
       {/* 分页控制（仅 API 模式） */}
       {!hasLocalData && apiState.totalPages > 1 && (
-        <div className="flex items-center justify-between border-t bg-slate-50 px-3 py-2">
+        <div className="flex items-center justify-between border-t border-slate-200 bg-white px-3 py-2">
           <span className="text-xs text-slate-500">
             第 {apiState.page} / {apiState.totalPages} 页，共 {apiState.total} 条
           </span>
           <div className="flex gap-1">
             <button
+              type="button"
               onClick={() => handlePageChange(apiState.page - 1)}
               disabled={apiState.page <= 1}
-              className="p-1 rounded border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-100"
+              className="rounded border p-1 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-slate-100"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
             <button
+              type="button"
               onClick={() => handlePageChange(apiState.page + 1)}
               disabled={apiState.page >= apiState.totalPages}
-              className="p-1 rounded border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-100"
+              className="rounded border p-1 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-slate-100"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
@@ -408,12 +618,12 @@ export function AttributeTable({
         </div>
       )}
 
-      {/* 统计栏 */}
-      <div className="flex items-center justify-between border-t bg-slate-50 px-3 py-2 text-xs text-slate-500">
-        <span>记录数 {totalCount}</span>
-        <span>选中 {selectedFeatureIds.size}</span>
-        <span>字段数 {fields.length}</span>
-      </div>
+      {/* 仅在搜索/筛选/仅显示选中时显示命中状态（否则记录/字段数已在面板头，避免重复） */}
+      {isFiltering && (
+        <div className="border-t border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-500">
+          命中 {displayFeatures.length} / 共 {totalCount} 条 · 选中 {selectedFeatureIds.size}
+        </div>
+      )}
     </div>
   );
 }

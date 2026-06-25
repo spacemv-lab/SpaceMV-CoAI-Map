@@ -4,19 +4,19 @@
  */
 
 import { BoxSelectionOverlay } from './box-selection-overlay';
-import { ExportConfigPanel } from './export-config-panel';
 import { ExportPreviewCanvas } from './export-preview-canvas';
 
 /**
  * Export panel container
- * Orchestrates box selection, preview, and config panel
+ * Orchestrates the in-map pieces: box selection overlay + live preview canvas.
+ * The config UI (要素控制面板) lives in the RightPanel "导出" tab — see
+ * `ExportConfigPanel`, mounted by `RightPanel`'s export tab content.
  */
 export function ExportPanel() {
   return (
     <>
       <BoxSelectionOverlay />
       <ExportPreviewCanvas />
-      <ExportConfigPanel />
     </>
   );
 }

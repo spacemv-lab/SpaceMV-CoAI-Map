@@ -5,7 +5,7 @@
 
 import maplibregl from 'maplibre-gl';
 import { ExportConfig, ExportPanelState } from '../types/export-state';
-import { drawTitle, drawNorthArrow, drawScaleBar, drawLegend, drawTianditu, loadNorthArrowSvg, loadTiandituLogo } from './map-elements';
+import { drawTitle, drawNorthArrow, drawScaleBar, drawLegend, drawTianditu, drawBrand, loadNorthArrowSvg, loadTiandituLogo } from './map-elements';
 import { useMapStore } from '../store/use-map-store';
 
 /**
@@ -123,6 +123,7 @@ export async function exportMapImage(
   drawScaleBar(ctx, config.scaleBar, exportWidth, exportHeight, metersPerPixel);
   drawLegend(ctx, config.legend, exportWidth, exportHeight, layers);
   drawTianditu(ctx, config.tianditu, exportWidth, exportHeight, tiandituLogoImage);
+  drawBrand(ctx, config.brand, exportWidth, exportHeight);
 
   // Export to PNG
   const mimeType = 'image/png';

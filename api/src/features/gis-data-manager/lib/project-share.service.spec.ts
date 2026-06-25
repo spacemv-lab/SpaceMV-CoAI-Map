@@ -20,6 +20,7 @@ function createService() {
   const projectShare = {
     create: jest.fn(),
     findMany: jest.fn(),
+    findFirst: jest.fn(),
     findUnique: jest.fn(),
     update: jest.fn(),
   };
@@ -101,6 +102,46 @@ describe('ProjectShareService', () => {
       await service.createShare('proj-1', { expiresAt: '2027-01-01T00:00:00.000Z' });
       const passed = projectShare.create.mock.calls[0][0].data.expiresAt;
       expect(passed).toBeInstanceOf(Date);
+    });
+  });
+
+  describe('getOrCreateEmbedToken', () => {
+    it('returns the existing active embed token without creating a new one', async () => {
+      const { service, projectShare } = createService();
+      projectShare.findFirst.mockResolvedValue({ ...baseShare, label: 'embed' });
+
+      const dto = await service.getOrCreateEmbedToken('proj-1');
+
+      // where 必须把过期/已撤销排除在外
+      expect(projectShare.findFirst).toHaveBeenCalledWith({
+        where: {
+          projectId: 'proj-1',
+          label: 'embed',
+          revokedAt: null,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(projectShare.create).not.toHaveBeenCalled();
+      expect(dto.token).toBe('tok-abc');
+    });
+
+    it('creates a new embed token when none exists', async () => {
+      const { service, projectShare } = createService();
+      projectShare.findFirst.mockResolvedValue(null);
+      projectShare.create.mockResolvedValue({ ...baseShare, label: 'embed' });
+
+      const dto = await service.getOrCreateEmbedToken('proj-1');
+
+      expect(projectShare.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          projectId: 'proj-1',
+          label: 'embed',
+          expiresAt: null,
+        }),
+      });
+      expect(projectShare.create.mock.calls[0][0].data.token).toMatch(/^[A-Za-z0-9_-]+$/);
+      expect(dto.label).toBe('embed');
     });
   });
 

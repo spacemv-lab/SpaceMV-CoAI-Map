@@ -159,7 +159,20 @@ export function EditPanel() {
     }
   };
 
-  const propEntries = Object.entries(properties);
+  // 优先按字段 schema 渲染（空值也显示，新增字段可见）；schema 为空时退回原始 properties
+  const fieldList = layer.fields ?? [];
+  const propRows: Array<{ key: string; label: string; value: unknown }> =
+    fieldList.length > 0
+      ? fieldList.map((field) => ({
+          key: field.name,
+          label: field.alias || field.name,
+          value: properties[field.name],
+        }))
+      : Object.entries(properties).map(([key, value]) => ({
+          key,
+          label: key,
+          value,
+        }));
 
   return (
     <div className="flex flex-col h-full text-sm pointer-events-auto">
@@ -194,19 +207,19 @@ export function EditPanel() {
       {/* Properties - fills remaining space */}
       <div className="flex-1 flex flex-col min-h-0 p-3 border-b overflow-hidden">
         <h4 className="font-medium text-gray-700 mb-2 shrink-0">属性</h4>
-        {propEntries.length === 0 ? (
+        {propRows.length === 0 ? (
           <div className="text-xs text-gray-400">无属性数据</div>
         ) : (
           <div className="flex-1 overflow-y-auto space-y-1 min-h-0">
-            {propEntries.map(([key, value]) => (
-              <div key={key} className="flex items-start gap-2 text-xs">
-                <span className="text-gray-500 font-medium w-24 shrink-0 truncate" title={key}>
-                  {key}
+            {propRows.map((row) => (
+              <div key={row.key} className="flex items-start gap-2 text-xs">
+                <span className="text-gray-500 font-medium w-24 shrink-0 truncate" title={row.key}>
+                  {row.label}
                 </span>
                 <input
                   type="text"
-                  defaultValue={typeof value === 'object' ? JSON.stringify(value) : String(value ?? '-')}
-                  onBlur={(e) => handlePropertyChange(key, e.target.value)}
+                  defaultValue={typeof row.value === 'object' ? JSON.stringify(row.value) : String(row.value ?? '-')}
+                  onBlur={(e) => handlePropertyChange(row.key, e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') e.currentTarget.blur();
                   }}

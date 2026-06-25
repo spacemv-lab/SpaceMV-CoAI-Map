@@ -73,6 +73,14 @@ export function LayerManager({ readOnly = false }: { readOnly?: boolean } = {}) 
     }
   }, [renameLayerId]);
 
+  // 下拉菜单指向的图层若已不存在（如保存后旧 Draw 图层被删除），自动收起菜单，
+  // 避免菜单挂在已删除/重建的同 id 图层上造成误触
+  useEffect(() => {
+    if (openDropdownId && !layers.some((l) => l.id === openDropdownId)) {
+      setOpenDropdownId(null);
+    }
+  }, [layers, openDropdownId]);
+
   /**
    * 删除图层前的确认逻辑
    * 如果正在编辑该图层的要素，弹出确认提示

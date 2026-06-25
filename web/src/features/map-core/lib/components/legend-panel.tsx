@@ -3,7 +3,7 @@
  * This project is licensed under the MIT License - see the LICENSE file in the project root for details.
  */
 
-import { List, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useMapStore } from '../store/use-map-store';
 
 const DEFAULT_COLOR = '#cccccc';
@@ -47,17 +47,8 @@ export function LegendPanel() {
   const layers = useMapStore((s) => s.layers);
   const setLegendVisible = useMapStore((s) => s.setLegendVisible);
 
-  if (!legendVisible) {
-    return (
-      <button
-        onClick={() => setLegendVisible(true)}
-        className="bg-white/90 backdrop-blur rounded-lg shadow-lg border p-2 text-gray-600 hover:text-gray-800 hover:bg-white transition-colors"
-        title="显示图例"
-      >
-        <List className="w-5 h-5" />
-      </button>
-    );
-  }
+  // 图例显隐由侧边栏工具栏的图例按钮统一控制；隐藏时不渲染浮动入口。
+  if (!legendVisible) return null;
 
   return (
     <div className="bg-white/90 backdrop-blur rounded-lg shadow-lg border p-4 text-sm relative min-w-40 max-w-64">

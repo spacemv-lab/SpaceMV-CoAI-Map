@@ -4,6 +4,7 @@
  */
 
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMapStore } from '../store/use-map-store';
 import { createDatasetWithFeatures } from '@/features/gis-data-manager/feature-api';
 import { GeometryType as PrismaGeometryType } from '@prisma/client';
@@ -21,6 +22,7 @@ export function SaveDrawingDialog({ layerId, onClose }: SaveDrawingDialogProps) 
   const currentProjectId = useMapStore((state) => state.currentProjectId);
   const addLayer = useMapStore((state) => state.addLayer);
   const removeLayer = useMapStore((state) => state.removeLayer);
+  const setInteractionMode = useMapStore((state) => state.setInteractionMode);
 
   const layer = layers.find((l) => l.id === layerId);
   const [name, setName] = useState(layer?.name || '');
@@ -61,13 +63,15 @@ export function SaveDrawingDialog({ layerId, onClose }: SaveDrawingDialogProps) 
       // 将 Prisma GeometryType 转换为前端 GeometryType (只支持简单类型)
       const frontendGeometryType = result.geometryType as GeometryType;
 
-      // 构造 routingMetadata，确保 datasetId 存在
+      // 构造 routingMetadata：后端 buildDatasetRoutingSummary 把路由字段
+      // (datasetId/geometryType/bbox/mvtUrlTemplate/recordCount)平铺在响应顶层，
+      // 不在 routingMetadata 嵌套对象里
       const routingMetadata: LayerRoutingMetadata = {
-        datasetId: result.routingMetadata.datasetId,
-        geometryType: result.routingMetadata.geometryType as GeometryType,
-        bbox: result.routingMetadata.bbox,
-        mvtUrlTemplate: result.routingMetadata.mvtUrlTemplate,
-        recordCount: result.routingMetadata.recordCount,
+        datasetId: result.datasetId,
+        geometryType: result.geometryType as GeometryType,
+        bbox: result.bbox as [number, number, number, number],
+        mvtUrlTemplate: result.mvtUrlTemplate,
+        recordCount: result.recordCount,
       };
 
       // 创建新的 GeoJSON 图层
@@ -85,6 +89,9 @@ export function SaveDrawingDialog({ layerId, onClose }: SaveDrawingDialogProps) 
       });
 
       toast.success(`数据集 "${name}" 已保存`);
+      // 保存即结束本轮绘制：退出绘制模式（旧 Draw 图层已被 removeLayer 删除，
+      // 继续留在绘制态会画进不存在的图层）
+      setInteractionMode('default');
       onClose();
     } catch (err) {
       console.error('[SaveDrawing] Failed:', err);
@@ -94,7 +101,7 @@ export function SaveDrawingDialog({ layerId, onClose }: SaveDrawingDialogProps) 
     }
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl w-96 max-w-[90vw]">
         {/* Header */}
@@ -161,6 +168,7 @@ export function SaveDrawingDialog({ layerId, onClose }: SaveDrawingDialogProps) 
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

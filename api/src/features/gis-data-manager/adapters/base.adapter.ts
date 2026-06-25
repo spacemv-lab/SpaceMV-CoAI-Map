@@ -26,9 +26,18 @@ export interface ParseResult {
 }
 
 /**
+ * Parse-time options forwarded from the upload/ingest pipeline.
+ * encoding: shapefile DBF source encoding (e.g. 'GBK', 'GB18030').
+ *           undefined → let GDAL read the .cpg sidecar / DBF LDID (auto-detect).
+ */
+export interface ParseOptions {
+  encoding?: string;
+}
+
+/**
  * Base adapter interface for all file format adapters
  */
-export abstract class BaseAdapter {
+export abstract class BaseAdapter<TOptions = unknown> {
   protected readonly logger = new Logger(BaseAdapter.name);
 
   /**
@@ -47,7 +56,7 @@ export abstract class BaseAdapter {
   /**
    * Parse the file and return structured data
    */
-  abstract parse(filePathOrBuffer: string | Buffer): Promise<ParseResult>;
+  abstract parse(filePathOrBuffer: string | Buffer, options?: TOptions): Promise<ParseResult>;
 
   /**
    * Validate the file structure before parsing

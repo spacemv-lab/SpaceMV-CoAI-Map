@@ -7,7 +7,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
-import { BaseAdapter, ParseResult, ParsedFeature } from './base.adapter';
+import { BaseAdapter, ParseResult, ParseOptions, ParsedFeature } from './base.adapter';
 import { GdalService } from '../utils/gdal.service';
 import { MinioService } from '../services/minio.service';
 
@@ -31,7 +31,7 @@ export class ShapefileAdapter extends BaseAdapter {
   /**
    * Parse shapefile zip using GDAL ogr2ogr
    */
-  async parse(filePathOrBuffer: string | Buffer): Promise<ParseResult> {
+  async parse(filePathOrBuffer: string | Buffer, options?: ParseOptions): Promise<ParseResult> {
     let filePath: string;
     let cleanup: (() => Promise<void>) | undefined;
 
@@ -57,7 +57,7 @@ export class ShapefileAdapter extends BaseAdapter {
         );
       }
 
-      return await this.parseWithGdal(filePath);
+      return await this.parseWithGdal(filePath, options);
     } finally {
       // Cleanup temp file if we downloaded from MinIO
       if (cleanup) {
@@ -69,7 +69,7 @@ export class ShapefileAdapter extends BaseAdapter {
   /**
    * Parse using GDAL ogr2ogr
    */
-  private async parseWithGdal(filePath: string): Promise<ParseResult> {
+  private async parseWithGdal(filePath: string, options?: ParseOptions): Promise<ParseResult> {
     this.logger.log(`Parsing shapefile with GDAL: ${filePath}`);
 
     // Validate zip file contents before GDAL processing
@@ -83,10 +83,15 @@ export class ShapefileAdapter extends BaseAdapter {
       const geojsonPath = await this.gdalService.createTempFile('.geojson');
 
       try {
-        // Convert to GeoJSON using the extracted .shp file
+        // Convert to GeoJSON using the extracted .shp file.
+        // encoding: undefined (auto) → GDAL reads the .cpg sidecar / DBF LDID;
+        // a concrete value (GBK/GB18030/...) overrides it. Never hardcode UTF-8
+        // here: that forced GDAL to mis-read GBK DBFs and was the root cause of
+        // Chinese-attribute mojibake (the upload "auto-detect (CPG)" option was
+        // silently ignored because of it).
         const result = await this.gdalService.convertToGeoJSON(extractedPath, geojsonPath, {
           targetCRS: 'EPSG:4326',
-          encoding: 'UTF-8',
+          encoding: options?.encoding,
         });
 
         if (!result.success) {
@@ -228,10 +233,9 @@ export class ShapefileAdapter extends BaseAdapter {
 
       for (const feature of featureArray) {
         if (feature.type === 'Feature') {
-          // Normalize properties
           const properties: Record<string, any> = {};
           for (const [key, value] of Object.entries(feature.properties || {})) {
-            properties[key] = this.normalizeValue(value);
+            properties[key] = value;
           }
 
           features.push({
@@ -291,10 +295,9 @@ export class ShapefileAdapter extends BaseAdapter {
 
     for (const feature of featureArray) {
       if (feature.type === 'Feature') {
-        // GDAL may encode some properties specially, normalize them
         const properties: Record<string, any> = {};
         for (const [key, value] of Object.entries(feature.properties || {})) {
-          properties[key] = this.normalizeValue(value);
+          properties[key] = value;
         }
 
         features.push({
@@ -357,19 +360,6 @@ export class ShapefileAdapter extends BaseAdapter {
     }
 
     return { valid: errors.length === 0, errors };
-  }
-
-  private normalizeValue(value: any): any {
-    if (typeof value === 'string') {
-      // Handle potential encoding issues from DBF
-      try {
-        // Try to decode as UTF-8, fallback to original
-        return Buffer.from(value, 'latin1').toString('utf-8');
-      } catch {
-        return value;
-      }
-    }
-    return value;
   }
 
   private normalizeGeometryType(type: string): string {

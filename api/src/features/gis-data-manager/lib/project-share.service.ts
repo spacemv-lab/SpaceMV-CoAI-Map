@@ -38,6 +38,9 @@ export class ProjectShareService {
     return this.datasetService.projectShare;
   }
 
+  /** 嵌入 token 的固定 label：与 owner 在 UI 手动建/撤的分享隔离 */
+  private static readonly EMBED_LABEL = 'embed';
+
   /** 校验当前用户是项目所有者；项目不存在 404，非所有者 403 */
   async assertOwnership(projectId: string, userId: string): Promise<void> {
     const project = await this.datasetService.project.findUnique({
@@ -60,6 +63,36 @@ export class ProjectShareService {
         projectId,
         label: dto.label,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
+      },
+    });
+    return this.toDto(created);
+  }
+
+  /**
+   * 幂等获取项目的嵌入 token：有活跃的 embed token 就返回，否则生成一条。
+   * 供外部平台（如 Wendao）嵌入地图 —— 一个项目一个稳定 token，
+   * 与 owner 在 UI 手动建/撤的分享隔离（撤销手动分享不影响嵌入）。
+   * 注：过期/已撤销的记录被 where 条件排除，视为不存在 → 走创建分支。
+   */
+  async getOrCreateEmbedToken(projectId: string): Promise<ShareDto> {
+    const now = new Date();
+    const existing = await this.share.findFirst({
+      where: {
+        projectId,
+        label: ProjectShareService.EMBED_LABEL,
+        revokedAt: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existing) return this.toDto(existing);
+
+    const created = await this.share.create({
+      data: {
+        token: generateShareToken(),
+        projectId,
+        label: ProjectShareService.EMBED_LABEL,
+        expiresAt: null,
       },
     });
     return this.toDto(created);

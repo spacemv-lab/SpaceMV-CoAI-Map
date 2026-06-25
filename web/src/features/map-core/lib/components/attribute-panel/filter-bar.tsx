@@ -21,22 +21,23 @@ interface FilterCondition {
 
 interface FilterBarProps {
   layerId: string;
-  onFilterChange?: (filter: (feature: any) => boolean) => void;
+  onFilterChange?: (filter: ((feature: any) => boolean) | null) => void;
+  /** 应用 / 清除筛选后回调（用于关闭 popover） */
+  onApplied?: () => void;
 }
 
-export function FilterBar({ layerId, onFilterChange }: FilterBarProps) {
+export function FilterBar({ layerId, onFilterChange, onApplied }: FilterBarProps) {
   const layers = useMapStore((state) => state.layers);
   const layer = layers.find((l) => l.id === layerId);
 
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
   const [logicOperator, setLogicOperator] = useState<'and' | 'or'>('and');
 
-  // 获取所有字段名
-  const allFields = useMemo(() => {
-    if (!layer?.data?.features?.length) return [];
-    const firstFeature = layer.data.features[0];
-    return Object.keys(firstFeature.properties || {});
-  }, [layer]);
+  // 字段名取自图层字段定义（本地与 API/MVT 图层都有），不依赖要素数据
+  const allFields = useMemo(
+    () => (layer?.fields ?? []).map((field) => field.name),
+    [layer?.fields],
+  );
 
   // 添加条件
   const handleAddCondition = () => {
@@ -61,10 +62,11 @@ export function FilterBar({ layerId, onFilterChange }: FilterBarProps) {
     );
   };
 
-  // 应用过滤
+  // 应用过滤（无条件 → 传 null 表示“无筛选”）
   const applyFilter = () => {
     if (conditions.length === 0) {
-      onFilterChange?.(() => true);
+      onFilterChange?.(null);
+      onApplied?.();
       return;
     }
 
@@ -99,16 +101,18 @@ export function FilterBar({ layerId, onFilterChange }: FilterBarProps) {
     };
 
     onFilterChange?.(filterFn);
+    onApplied?.();
   };
 
   // 清除过滤
   const handleClearFilter = () => {
     setConditions([]);
-    onFilterChange?.(() => true);
+    onFilterChange?.(null);
+    onApplied?.();
   };
 
   return (
-    <div className="p-3 border-b bg-gray-50 space-y-2">
+    <div className="space-y-2 p-3">
       {/* 标题栏 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm text-gray-600">

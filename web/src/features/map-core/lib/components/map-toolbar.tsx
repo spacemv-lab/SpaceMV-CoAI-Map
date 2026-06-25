@@ -4,13 +4,15 @@
  */
 
 import { useMapStore } from '../store/use-map-store';
-import { Maximize, Download, Map as MapIcon, Plus, Minus } from 'lucide-react';
+import { Maximize, Download, Map as MapIcon, Plus, Minus, SwatchBook } from 'lucide-react';
+import { toast } from 'sonner';
+import maplibregl from 'maplibre-gl';
 
 export function MapToolbar() {
-  const zoom = useMapStore((state) => state.viewport.zoom);
-  const setViewport = useMapStore((state) => state.setViewport);
   const basemap = useMapStore((state) => state.basemap);
   const setBasemap = useMapStore((state) => state.setBasemap);
+  const legendVisible = useMapStore((state) => state.legendVisible);
+  const setLegendVisible = useMapStore((state) => state.setLegendVisible);
 
   const handleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -26,12 +28,27 @@ export function MapToolbar() {
     useMapStore.getState().openExportPanel();
   };
 
+  // 缩放直接驱动 MapLibre 实例。store 的 viewport.zoom 实为相机高度（米），
+  // 旧实现 ±1 米在 60 万米尺度下经 heightToZoomLevel 取整后无变化，故按钮无效。
+  // map.zoomIn/zoomOut 原生遵守 minZoom/maxZoom；动画结束 moveend 会回写 store 保持同步。
   const handleZoomIn = () => {
-    setViewport({ zoom: zoom + 1 });
+    const map = (window as unknown as { MAPLIBRE_MAP?: maplibregl.Map }).MAPLIBRE_MAP;
+    if (!map) {
+      toast.error('地图查看器未初始化');
+      console.error('[MapToolbar.zoomIn] MAPLIBRE_MAP is undefined');
+      return;
+    }
+    map.zoomIn();
   };
 
   const handleZoomOut = () => {
-    setViewport({ zoom: zoom - 1 });
+    const map = (window as unknown as { MAPLIBRE_MAP?: maplibregl.Map }).MAPLIBRE_MAP;
+    if (!map) {
+      toast.error('地图查看器未初始化');
+      console.error('[MapToolbar.zoomOut] MAPLIBRE_MAP is undefined');
+      return;
+    }
+    map.zoomOut();
   };
 
   const cycleBasemap = () => {
@@ -89,6 +106,14 @@ export function MapToolbar() {
                         ? '天地图全球境界'
                         : basemap}
           </span>
+        </button>
+
+        <button
+          onClick={() => setLegendVisible(!legendVisible)}
+          className={`p-2 rounded transition-colors ${legendVisible ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+          title="图例"
+        >
+          <SwatchBook className="w-5 h-5" />
         </button>
 
         <div className="h-px bg-gray-200 my-1" />

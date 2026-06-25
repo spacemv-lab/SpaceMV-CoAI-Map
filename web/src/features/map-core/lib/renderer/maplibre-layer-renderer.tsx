@@ -26,7 +26,7 @@ import {
   shouldUseGraduatedStyle,
 } from '../utils/graduated-style-expression';
 import { parseLabelExpression } from './label-expression-parser';
-import { getLabelAnchor, getDefaultLabelPosition } from '../types/label-position';
+import { getLabelAnchor, getDefaultLabelPosition, DEFAULT_LABEL_ANCHOR_CANDIDATES, PointLabelPosition, PolygonLabelPlacementMode } from '../types/label-position';
 import { createSymbolCanvas } from '../utils/symbol-canvas';
 
 // MapLibre paint properties 类型（使用 Record 避免 strict typing）
@@ -1059,6 +1059,21 @@ function updateLabelLayer(map: maplibregl.Map, layer: LayerState) {
     ];
   }
 
+  // 面要素标注放置模式（仅 POLYGON；缺省视为 'auto'）
+  const polygonPlacement: PolygonLabelPlacementMode | null =
+    layer.geometryType === 'POLYGON' ? (labelStyle.placementMode ?? 'auto') : null;
+  const isPolygonAuto = polygonPlacement === 'auto';
+  const isPolygonFixed = polygonPlacement === 'fixed';
+
+  // 是否允许标注重叠（默认 false；重叠时引擎自动隐藏低优先级标注）
+  const allowOverlap = labelStyle.allowOverlap ?? false;
+
+  // auto 模式候选锚点（text-variable-anchor）
+  const variableAnchorCandidates: PointLabelPosition[] =
+    labelStyle.anchorCandidates && labelStyle.anchorCandidates.length > 0
+      ? labelStyle.anchorCandidates
+      : DEFAULT_LABEL_ANCHOR_CANDIDATES;
+
   // 线要素沿线标注的特殊处理
   const isLineAlong = layer.geometryType === 'LINESTRING' && position === 'along';
   const isLinePointLabel = layer.geometryType === 'LINESTRING' && ['start', 'end', 'middle'].includes(position);
@@ -1101,8 +1116,8 @@ function updateLabelLayer(map: maplibregl.Map, layer: LayerState) {
     const currentSource = currentLayer?.source;
     const expectedSource = linePointSourceId || layer.id;
 
-    // 如果 source 不匹配，删除旧图层并重新创建
-    if (currentSource !== expectedSource) {
+    // source 不匹配，或面要素标注（放置模式/variable-anchor 切换需重建）
+    if (currentSource !== expectedSource || layer.geometryType === 'POLYGON') {
       map.removeLayer(labelLayerId);
       // 继续执行后面的添加逻辑
     } else {
@@ -1118,8 +1133,8 @@ function updateLabelLayer(map: maplibregl.Map, layer: LayerState) {
         map.setPaintProperty(labelLayerId, 'text-halo-width', labelStyle.outlineWidth ?? 1);
         map.setLayerZoomRange(labelLayerId, minZoom, maxZoom);
 
-        // 点要素和面要素设置偏移量
-        if (layer.geometryType === 'POINT' || layer.geometryType === 'POLYGON') {
+        // 点要素设置偏移量（面要素标注走重建路径，不在此就地更新）
+        if (layer.geometryType === 'POINT') {
           map.setLayoutProperty(labelLayerId, 'text-offset', textOffset);
         }
 
@@ -1151,14 +1166,20 @@ function updateLabelLayer(map: maplibregl.Map, layer: LayerState) {
       'text-field': textField as any,
       'text-font': [labelStyle.font ?? 'Arial Unicode MS Regular'],
       'text-size': fontSize,
-      'text-anchor': anchor as any,
-      'text-allow-overlap': false,
+      'text-allow-overlap': allowOverlap,
       'text-padding': labelStyle.padding ?? 2,
       'symbol-placement': symbolPlacement,
       'symbol-spacing': symbolSpacing,
       'text-rotation-alignment': isLineAlong ? 'map' : 'viewport',
-      // 点要素和面要素添加偏移量
-      ...((layer.geometryType === 'POINT' || layer.geometryType === 'POLYGON') && { 'text-offset': textOffset }),
+      // text-anchor：auto 面要素不设（由 variable-anchor 决定），其余沿用计算值
+      ...(!isPolygonAuto && { 'text-anchor': anchor as any }),
+      // text-offset：仅 POINT 与 固定锚点面要素
+      ...((layer.geometryType === 'POINT' || isPolygonFixed) && { 'text-offset': textOffset }),
+      // 面要素自动寻位：候选锚点 + 径向偏移
+      ...(isPolygonAuto && {
+        'text-variable-anchor': variableAnchorCandidates,
+        'text-radial-offset': labelStyle.radialOffset ?? 1,
+      }),
     },
     paint: {
       'text-color': textColor,

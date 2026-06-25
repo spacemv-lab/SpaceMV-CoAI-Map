@@ -5,10 +5,12 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
+import { toast } from 'sonner';
 import { useMapStore } from '../store/use-map-store';
 import { v4 as uuidv4 } from 'uuid';
 import { GeometryType, InteractionMode, LayerState } from '../types/map-state';
 import { STYLE_CONFIGS } from '../constants/style-config';
+import { createDatasetFeature } from '@/features/gis-data-manager/feature-api';
 
 /**
  * 绘制图层 ID 常量
@@ -125,12 +127,14 @@ export function MapLibreDrawRenderer() {
   const addLayer = useMapStore((state) => state.addLayer);
   const updateLayer = useMapStore((state) => state.updateLayer);
   const layers = useMapStore((state) => state.layers);
-  const activeLayerId = useMapStore((state) => state.activeLayerId);
   const setInteractionMode = useMapStore((state) => state.setInteractionMode);
 
   // 绘制状态 refs
   const pointsRef = useRef<[number, number][]>([]);
   const isDrawingRef = useRef(false);
+  // 最近一次“加点”单击的像素坐标：用于在 dblclick 收尾时识别并去掉
+  // 双击第二击产生的重复顶点（双击=两次同位 click + 一次 dblclick）
+  const lastVertexPixelRef = useRef<{ x: number; y: number } | null>(null);
 
   // 获取 MapLibre map 实例
   const getMap = useCallback(() => {
@@ -223,20 +227,67 @@ export function MapLibreDrawRenderer() {
       addToDrawLayer(feature, mode);
     }
 
-    // 清理临时图层
+    // 清理临时图层，准备连续绘制下一个要素（不退出绘制模式；
+    // 退出由“再点当前工具 / 点选择 / Esc”触发）
     clearDrawLayer(map);
     pointsRef.current = [];
+    lastVertexPixelRef.current = null;
     isDrawingRef.current = false;
-    setInteractionMode('default');
-  }, [getMap, setInteractionMode]);
+  }, [getMap]);
 
-  // 添加到 Draw 图层
-  const addToDrawLayer = useCallback((feature: GeoJSON.Feature, mode: InteractionMode) => {
-    const geomType = (feature.geometry as { type: string }).type.toUpperCase() as GeometryType;
+  // 落点：按目标图层类型分流 —— 已保存的 MVT/GeoJSON 图层写后端并重载瓦片；
+  // 本地 Draw 图层（我的标注）累积到本地 data。
+  // 注：从 useMapStore.getState() 取最新 activeLayerId/layers，避免 finishDrawing
+  // 因 useCallback 记忆而持有过期闭包（否则会一直落到首次渲染时的图层）。
+  const addToDrawLayer = useCallback(
+    async (feature: GeoJSON.Feature, mode: InteractionMode) => {
+      const geomType = (feature.geometry as { type: string }).type.toUpperCase() as GeometryType;
+      const { activeLayerId: activeId, layers: currentLayers } = useMapStore.getState();
 
-    // 如果有活跃编辑图层，添加到该图层
-    if (activeLayerId) {
-      const targetLayer = layers.find((l) => l.id === activeLayerId);
+      // 有活跃编辑图层：按其类型分流
+      if (activeId) {
+        const targetLayer = currentLayers.find((l) => l.id === activeId);
+        if (targetLayer) {
+          // 已保存图层走 MVT 瓦片渲染，本地 data 不被读取 → 必须写后端 + 重载瓦片
+          if (targetLayer.type === 'GeoJSON' && targetLayer.sourceId) {
+            try {
+              await createDatasetFeature(targetLayer.sourceId, {
+                id: String(feature.id),
+                geometry: feature.geometry as unknown as Record<string, unknown>,
+                properties: (feature.properties as Record<string, unknown>) || {},
+              });
+              window.dispatchEvent(
+                new CustomEvent('map:reload-mvt', { detail: { layerId: activeId } }),
+              );
+            } catch {
+              toast.error('要素保存失败，请重试');
+            }
+            return;
+          }
+
+          // 本地 Draw 图层（我的标注）→ 累积到本地 data
+          const localData = {
+            type: 'FeatureCollection',
+            features: [
+              ...(targetLayer.data?.features || []),
+              feature as { id: string; properties?: Record<string, unknown>; geometry: unknown },
+            ],
+          };
+          updateLayer(activeId, { data: localData });
+          return;
+        }
+      }
+
+      // 无活动编辑图层 → 落到默认"我的标注"图层（本地）
+      const modeToGeomType: Record<string, GeometryType> = {
+        draw_point: 'POINT',
+        draw_line: 'LINESTRING',
+        draw_polygon: 'POLYGON',
+      };
+      const targetGeomType = modeToGeomType[mode] ?? geomType;
+
+      const targetLayerId = DRAW_LAYER_IDS[targetGeomType as keyof typeof DRAW_LAYER_IDS];
+      const targetLayer = currentLayers.find((l) => l.id === targetLayerId);
       if (targetLayer) {
         const newData = {
           type: 'FeatureCollection',
@@ -245,93 +296,68 @@ export function MapLibreDrawRenderer() {
             feature as { id: string; properties?: Record<string, unknown>; geometry: unknown },
           ],
         };
-        updateLayer(activeLayerId, { data: newData });
-        return;
+        updateLayer(targetLayerId, { data: newData });
+      } else {
+        console.warn('[MapLibreDrawRenderer] Target layer not found:', targetLayerId);
       }
-    }
-
-    // 添加到默认绘制图层
-    const modeToGeomType: Record<string, GeometryType> = {
-      draw_point: 'POINT',
-      draw_line: 'LINESTRING',
-      draw_polygon: 'POLYGON',
-    };
-    const targetGeomType = modeToGeomType[mode] ?? geomType;
-
-    const targetLayerId = DRAW_LAYER_IDS[targetGeomType as keyof typeof DRAW_LAYER_IDS];
-
-    // 直接更新 store（图层已在 ensureDrawLayerExists 中创建）
-    const currentLayers = useMapStore.getState().layers;
-    const targetLayer = currentLayers.find((l) => l.id === targetLayerId);
-    if (targetLayer) {
-      const newData = {
-        type: 'FeatureCollection',
-        features: [
-          ...(targetLayer.data?.features || []),
-          feature as { id: string; properties?: Record<string, unknown>; geometry: unknown },
-        ],
-      };
-      updateLayer(targetLayerId, { data: newData });
-    } else {
-      console.warn('[MapLibreDrawRenderer] Target layer not found:', targetLayerId);
-    }
-  }, [activeLayerId, layers, updateLayer]);
+    },
+    [updateLayer],
+  );
 
   // 处理绘制事件
   useEffect(() => {
     const map = getMap();
     if (!map || !viewerReady) return;
 
-    // 非绘制模式时清理
+    // 非绘制模式时清理，并确保双击缩放恢复（浏览态需要）
     if (mode === 'default' || mode === 'select' || mode.startsWith('measure')) {
       clearDrawLayer(map);
       pointsRef.current = [];
+      lastVertexPixelRef.current = null;
       isDrawingRef.current = false;
+      map.doubleClickZoom.enable();
       return;
     }
 
-    // 绘制开始时确保目标图层存在
-    ensureDrawLayerExists(mode);
+    // 绘制开始时确保默认"我的标注"图层存在；编辑已保存图层时要素写后端，
+    // 不需要、也不应创建默认绘制图层
+    if (!useMapStore.getState().activeLayerId) {
+      ensureDrawLayerExists(mode);
+    }
 
-    // 单击计时器（用于区分单击和双击）
-    let clickTimeout: ReturnType<typeof setTimeout> | null = null;
-    let pendingClick: [number, number] | null = null;
+    // 绘制模式禁用双击缩放：双击用于收尾，不应放大地图
+    map.doubleClickZoom.disable();
 
-    // 绘制模式
+    // 单击：点模式立即成要素；线/面模式只负责加顶点（收尾交给 dblclick）
     const handleClick = (e: maplibregl.MapMouseEvent) => {
       const coord: [number, number] = [e.lngLat.lng, e.lngLat.lat];
 
       if (mode === 'draw_point') {
-        // 点模式：立即完成（不需要等待双击）
         finishDrawing([coord], mode);
         return;
       }
 
-      // 线/面模式：延迟处理单击，等待可能的第二次点击（双击）
-      if (clickTimeout) {
-        // 已有待处理的单击，清除计时器（这构成双击序列）
-        clearTimeout(clickTimeout);
-        clickTimeout = null;
-        pendingClick = null;
-
-        // 双击完成绘制
-        finishDrawing(pointsRef.current, mode);
-        return;
-      }
-
-      // 首次单击：添加点并设置计时器
       pointsRef.current.push(coord);
+      lastVertexPixelRef.current = { x: e.point.x, y: e.point.y };
       isDrawingRef.current = true;
       updateDrawDisplay(pointsRef.current, mode);
+    };
 
-      // 记录待处理的点（如果300ms内没有第二次点击，就确认这个点）
-      pendingClick = coord;
-      clickTimeout = setTimeout(() => {
-        // 单击确认（不是双击的一部分）
-        clickTimeout = null;
-        pendingClick = null;
-        // 点已经在 pointsRef 中了，不需要额外处理
-      }, 300);
+    // 双击：线/面收尾。双击会先触发两次 click（第二击与 dblclick 近乎同位，
+    // 已把一个重复顶点 push 进去），此处按像素距离识别并去掉该重复顶点。
+    const handleDblClick = (e: maplibregl.MapMouseEvent) => {
+      if (mode !== 'draw_line' && mode !== 'draw_polygon') return;
+      e.preventDefault();
+
+      const last = lastVertexPixelRef.current;
+      if (last) {
+        const dist2 = (last.x - e.point.x) ** 2 + (last.y - e.point.y) ** 2;
+        if (dist2 <= 9) {
+          pointsRef.current.pop();
+        }
+      }
+      lastVertexPixelRef.current = null;
+      finishDrawing(pointsRef.current, mode);
     };
 
     const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
@@ -343,21 +369,37 @@ export function MapLibreDrawRenderer() {
       updateDrawDisplay(points, mode);
     };
 
+    // Esc：放弃当前绘制并退出绘制模式
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      clearDrawLayer(map);
+      pointsRef.current = [];
+      lastVertexPixelRef.current = null;
+      isDrawingRef.current = false;
+      setInteractionMode('default');
+    };
+
     // 添加事件监听
     map.on('click', handleClick);
+    map.on('dblclick', handleDblClick);
     map.on('mousemove', handleMouseMove);
+    window.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      // Check if map is still valid before cleanup
+      // 用 getMap() 取实时全局：导航离开时容器会先把 window.MAPLIBRE_MAP 置空、
+      // 再 map.remove()，此时拿到 undefined 应整体跳过，避免对已销毁地图调用
+      // getSource 崩溃（早期版本用 effect 开头捕获的 map，会指向已销毁对象）
       const currentMap = getMap();
       if (currentMap) {
+        currentMap.doubleClickZoom.enable();
         currentMap.off('click', handleClick);
+        currentMap.off('dblclick', handleDblClick);
         currentMap.off('mousemove', handleMouseMove);
+        clearDrawLayer(currentMap);
       }
-      if (clickTimeout) clearTimeout(clickTimeout);
-      clearDrawLayer(currentMap);
+      window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [mode, viewerReady, getMap, updateDrawDisplay, finishDrawing]);
+  }, [mode, viewerReady, getMap, updateDrawDisplay, finishDrawing, setInteractionMode]);
 
   // 确保 Draw 图层存在
   const ensureDrawLayerExists = useCallback((mode: InteractionMode) => {

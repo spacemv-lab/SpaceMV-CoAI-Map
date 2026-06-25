@@ -107,6 +107,87 @@ export async function deleteFeature(
   }
 }
 
+/**
+ * 往已有数据集当前版本新增单个要素（绘制入已保存/MVT 图层）。
+ * 成功后由调用方触发 MVT 瓦片重载以即时显示。
+ */
+export async function createDatasetFeature(
+  datasetId: string,
+  feature: {
+    id: string;
+    geometry: Record<string, unknown>;
+    properties?: Record<string, unknown>;
+  },
+): Promise<{ featureId: string }> {
+  const response = await httpClient.post<ApiResponse<{ featureId: string }>>(
+    `/datasets/${datasetId}/features`,
+    {
+      id: feature.id,
+      geometry: feature.geometry,
+      properties: feature.properties,
+    },
+  );
+  return response.data.data!;
+}
+
+/**
+ * 仅更新要素属性（不动几何），整份 properties 替换。
+ * 供属性表单元格编辑：传入合并后的完整 properties。
+ */
+export async function updateFeatureProperties(
+  datasetId: string,
+  featureId: string,
+  properties: Record<string, unknown>,
+): Promise<void> {
+  await httpClient.patch(
+    `/datasets/${datasetId}/features/${featureId}/properties`,
+    { properties },
+  );
+}
+
+export interface DatasetFieldInput {
+  name: string;
+  alias?: string;
+  type?: string;
+  nullable?: boolean;
+  defaultValue?: unknown;
+}
+
+/** 新增数据集字段（写 schema + 给现有要素补默认值） */
+export async function addDatasetField(
+  datasetId: string,
+  field: DatasetFieldInput,
+): Promise<void> {
+  await httpClient.post(`/datasets/${datasetId}/fields`, field);
+}
+
+/** 更新数据集字段（别名/类型/可空；改名会同步要素 properties 的 key） */
+export async function updateDatasetField(
+  datasetId: string,
+  fieldName: string,
+  updates: {
+    name?: string;
+    alias?: string;
+    type?: string;
+    nullable?: boolean;
+  },
+): Promise<void> {
+  await httpClient.patch(
+    `/datasets/${datasetId}/fields/${encodeURIComponent(fieldName)}`,
+    updates,
+  );
+}
+
+/** 删除数据集字段（删 schema + 移除要素 properties 的 key） */
+export async function removeDatasetField(
+  datasetId: string,
+  fieldName: string,
+): Promise<void> {
+  await httpClient.delete(
+    `/datasets/${datasetId}/fields/${encodeURIComponent(fieldName)}`,
+  );
+}
+
 // ============================================================================
 // Dataset Style API
 // ============================================================================
@@ -129,13 +210,11 @@ export interface CreateDatasetResponse {
   name: string;
   geometryType: GeometryType;
   style: Record<string, unknown>;
-  routingMetadata: {
-    datasetId: string;
-    geometryType: GeometryType;
-    bbox: [number, number, number, number];
-    mvtUrlTemplate: string;
-    recordCount: number;
-  };
+  // 路由字段由后端 buildDatasetRoutingSummary 平铺在响应顶层（非 routingMetadata 嵌套）
+  datasetId: string;
+  bbox: [number, number, number, number];
+  mvtUrlTemplate: string;
+  recordCount: number;
 }
 
 /**

@@ -6,8 +6,8 @@
 import { useMapStore } from '../../store/use-map-store';
 import { useState, useRef } from 'react';
 import { X, Tag, ChevronDown } from 'lucide-react';
-import { GeometryType, LayerFieldDefinition } from '../../types/map-state';
-import { getDefaultLabelPosition } from '../../types/label-position';
+import { GeometryType, LayerFieldDefinition, LabelStyle } from '../../types/map-state';
+import { getDefaultLabelPosition, DEFAULT_LABEL_ANCHOR_CANDIDATES, PointLabelPosition } from '../../types/label-position';
 import { insertFieldToExpression } from '../../renderer/label-expression-parser';
 
 /**
@@ -235,17 +235,24 @@ export function LabelPanel() {
         {/* 标注位置（按几何类型动态渲染） */}
         <div className="space-y-1.5">
           <label className="text-xs text-gray-600 font-medium">标注位置</label>
-          <LabelPositionControl
-            geometryType={geometryType}
-            position={labelStyle.position}
-            repeatInterval={labelStyle.repeatInterval}
-            offsetX={labelStyle.offsetX}
-            offsetY={labelStyle.offsetY}
-            onPositionChange={handlePositionChange}
-            onRepeatIntervalChange={handleRepeatIntervalChange}
-            onOffsetXChange={handleOffsetXChange}
-            onOffsetYChange={handleOffsetYChange}
-          />
+          {geometryType === 'POLYGON' ? (
+            <PolygonLabelPlacement
+              labelStyle={labelStyle}
+              onUpdate={(patch) => updateLabelStyle(layer.id, patch)}
+            />
+          ) : (
+            <LabelPositionControl
+              geometryType={geometryType}
+              position={labelStyle.position}
+              repeatInterval={labelStyle.repeatInterval}
+              offsetX={labelStyle.offsetX}
+              offsetY={labelStyle.offsetY}
+              onPositionChange={handlePositionChange}
+              onRepeatIntervalChange={handleRepeatIntervalChange}
+              onOffsetXChange={handleOffsetXChange}
+              onOffsetYChange={handleOffsetYChange}
+            />
+          )}
         </div>
 
         {/* 文本符号 */}
@@ -325,6 +332,172 @@ export function LabelPanel() {
               <span className="text-xs text-gray-500">px</span>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 九宫格锚点选择器
+ * - 自动寻位：多选候选锚点（selected = anchorCandidates）
+ * - 固定锚点：单选（selected = [position]）
+ */
+const NINE_GRID: { pos: PointLabelPosition; icon: string }[] = [
+  { pos: 'top-left', icon: '↖' }, { pos: 'top', icon: '↑' }, { pos: 'top-right', icon: '↗' },
+  { pos: 'left', icon: '←' }, { pos: 'center', icon: '●' }, { pos: 'right', icon: '→' },
+  { pos: 'bottom-left', icon: '↙' }, { pos: 'bottom', icon: '↓' }, { pos: 'bottom-right', icon: '↘' },
+];
+
+function NineGridAnchor({
+  selected,
+  onSelect,
+}: {
+  selected: PointLabelPosition[];
+  onSelect: (pos: PointLabelPosition) => void;
+}) {
+  return (
+    <div className="inline-grid grid-cols-3 gap-1 w-fit">
+      {NINE_GRID.map(({ pos, icon }) => {
+        const on = selected.includes(pos);
+        return (
+          <button
+            key={pos}
+            type="button"
+            onClick={() => onSelect(pos)}
+            className={`w-9 h-9 flex items-center justify-center text-sm rounded border ${
+              on ? 'bg-blue-100 border-blue-400 text-blue-700' : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-400'
+            }`}
+          >
+            {icon}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function LabelRangeSlider({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-xs text-gray-600">
+        <span>{label}</span>
+        <span className="text-gray-500">{value} px</span>
+      </div>
+      <input
+        type="range"
+        min={-50}
+        max={50}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-200 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500"
+      />
+    </div>
+  );
+}
+
+/**
+ * 面要素标注放置：自动寻位 / 固定锚点 + 避让
+ * 替代 LabelPositionControl 的 POLYGON 分支
+ */
+function PolygonLabelPlacement({
+  labelStyle,
+  onUpdate,
+}: {
+  labelStyle: LabelStyle;
+  onUpdate: (patch: Partial<LabelStyle>) => void;
+}) {
+  const placementMode = (labelStyle.placementMode ?? 'auto') as 'auto' | 'fixed';
+  const allowOverlap = labelStyle.allowOverlap ?? false;
+
+  // 自动寻位候选锚点（缺省=九宫格全选）
+  const candidates: PointLabelPosition[] =
+    labelStyle.anchorCandidates && labelStyle.anchorCandidates.length > 0
+      ? labelStyle.anchorCandidates
+      : DEFAULT_LABEL_ANCHOR_CANDIDATES;
+
+  const toggleCandidate = (pos: PointLabelPosition) => {
+    const set = new Set(candidates);
+    if (set.has(pos)) {
+      if (set.size > 1) set.delete(pos); // 至少保留 1 个候选
+    } else {
+      set.add(pos);
+    }
+    onUpdate({ anchorCandidates: Array.from(set) });
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* 放置模式 */}
+      <div className="flex gap-2">
+        {(['auto', 'fixed'] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => onUpdate({ placementMode: mode })}
+            className={`flex-1 p-2 rounded text-xs border ${
+              placementMode === mode
+                ? 'bg-blue-50 border-blue-300 text-blue-700'
+                : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-600'
+            }`}
+          >
+            {mode === 'auto' ? '自动寻位' : '固定锚点'}
+          </button>
+        ))}
+      </div>
+
+      {placementMode === 'auto' ? (
+        <div className="space-y-2">
+          <div className="text-xs text-gray-500">候选锚点（重叠时引擎按序尝试）</div>
+          <NineGridAnchor selected={candidates} onSelect={toggleCandidate} />
+          <div className="flex items-center gap-2 pt-1">
+            <span className="text-xs text-gray-500 w-16">偏移半径</span>
+            <input
+              type="number"
+              min={0}
+              max={5}
+              step={0.5}
+              value={labelStyle.radialOffset ?? 1}
+              onChange={(e) => onUpdate({ radialOffset: Number(e.target.value) })}
+              className="w-14 px-1.5 py-1 border rounded text-sm text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <span className="text-xs text-gray-500">em</span>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <div className="text-xs text-gray-500">锚点</div>
+          <NineGridAnchor
+            selected={[(labelStyle.position as PointLabelPosition) ?? 'center']}
+            onSelect={(pos) => onUpdate({ position: pos })}
+          />
+          <div className="space-y-2 pt-1">
+            <LabelRangeSlider label="左右偏移" value={labelStyle.offsetX ?? 0} onChange={(v) => onUpdate({ offsetX: v })} />
+            <LabelRangeSlider label="上下偏移" value={labelStyle.offsetY ?? 0} onChange={(v) => onUpdate({ offsetY: v })} />
+          </div>
+        </div>
+      )}
+
+      {/* 避让（padding 间距沿用「可见范围」里的「标注间距」） */}
+      <div className="space-y-2 pt-2 border-t border-gray-200">
+        <div className="text-xs text-gray-600 font-medium">避让</div>
+        <div className="flex flex-col gap-1">
+          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+            <input type="radio" checked={!allowOverlap} onChange={() => onUpdate({ allowOverlap: false })} />
+            <span>自动避让（重叠标注自动隐藏）</span>
+          </label>
+          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+            <input type="radio" checked={allowOverlap} onChange={() => onUpdate({ allowOverlap: true })} />
+            <span>显示全部（允许重叠）</span>
+          </label>
         </div>
       </div>
     </div>
@@ -452,58 +625,6 @@ function LabelPositionControl({
             </div>
           </div>
         )}
-      </div>
-    );
-  }
-
-  // 面要素：基准面（中心点）+ 偏移控制
-  if (geometryType === 'POLYGON') {
-    return (
-      <div className="space-y-3">
-        {/* 基准面选项 */}
-        <div className="p-2 rounded text-xs border bg-blue-50 border-blue-300 text-blue-700">
-          基准面（中心点） ✓
-        </div>
-
-        {/* X轴偏移滑轨 */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-xs text-gray-600">
-            <span>左右偏移</span>
-            <span className="text-gray-500">{offsetX ?? 0} px</span>
-          </div>
-          <input
-            type="range"
-            min="-50"
-            max="50"
-            value={offsetX ?? 0}
-            onChange={(e) => onOffsetXChange(Number(e.target.value))}
-            className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-200 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500"
-          />
-          <div className="flex justify-between text-xs text-gray-400">
-            <span>← 左</span>
-            <span>右 →</span>
-          </div>
-        </div>
-
-        {/* Y轴偏移滑轨 */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-xs text-gray-600">
-            <span>上下偏移</span>
-            <span className="text-gray-500">{offsetY ?? 0} px</span>
-          </div>
-          <input
-            type="range"
-            min="-50"
-            max="50"
-            value={offsetY ?? 0}
-            onChange={(e) => onOffsetYChange(Number(e.target.value))}
-            className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-gray-200 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500"
-          />
-          <div className="flex justify-between text-xs text-gray-400">
-            <span>↑ 上</span>
-            <span>下 ↓</span>
-          </div>
-        </div>
       </div>
     );
   }
