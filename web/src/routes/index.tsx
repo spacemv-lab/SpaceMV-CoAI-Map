@@ -15,6 +15,7 @@ const HomePage = lazy(() => import('../pages/project-home/Index'));
 const MapPage = lazy(() => import('../pages/home/Index'));
 const DataPage = lazy(() => import('../pages/data/Index'));
 const ProjectDataPage = lazy(() => import('../pages/project/data/Index'));
+const BoardPage = lazy(() => import('../pages/project/board/Index'));
 const SharePage = lazy(() => import('../pages/share/Index'));
 
 // 占位页面组件
@@ -95,7 +96,11 @@ const router = createBrowserRouter([
           },
           {
             path: 'board',
-            element: <PlaceholderPage title="白板" />,
+            element: (
+              <Suspense fallback={<div className="p-6 text-sm">正在加载白板…</div>}>
+                <BoardPage />
+              </Suspense>
+            ),
           },
         ],
       },

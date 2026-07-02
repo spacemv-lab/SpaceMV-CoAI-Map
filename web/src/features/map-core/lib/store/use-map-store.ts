@@ -741,6 +741,11 @@ export const useMapStore = create<MapStoreState>()(
         state.activeLayerId = id;
         if (!id) {
           state.editPanel = { isOpen: false, featureId: null };
+          // 退出编辑会话时复位交互模式。绘制会把 mode 设成 draw_*，而各退出路径
+          // （停止编辑 / 关面板 / 双击空白 / Esc 编辑态）此前都不复位它，残留的
+          // draw_* 会让"双击要素进入编辑"的守卫（mode !== 'default' 即 return）失效，
+          // 并使"开启编辑"点击后立刻又进入绘制而非可双击编辑。
+          state.interaction.mode = 'default';
         }
       }),
 

@@ -16,6 +16,11 @@ WORKDIR /app
 COPY . .
 
 RUN pnpm install --no-frozen-lockfile
+# tldraw 生产 license key —— 公开的客户端运行时校验值（非密钥）。
+# 通过 `docker build --build-arg VITE_TLDRAW_LICENSE_KEY=...` 注入，
+# 进 bundle；不写进代码/仓库，故不会流进开源发布。不传则为空 → 维持水印。
+ARG VITE_TLDRAW_LICENSE_KEY
+ENV VITE_TLDRAW_LICENSE_KEY=$VITE_TLDRAW_LICENSE_KEY
 RUN pnpm --filter @txwx-monorepo/web build
 
 FROM nginx:1.27-alpine

@@ -12,6 +12,8 @@ import { ExternalDataController } from './external-data.controller';
 import { PublicShareController } from './public-share.controller';
 import { ProjectShareController } from './project-share.controller';
 import { ProjectShareService } from './project-share.service';
+import { WhiteboardController } from './whiteboard.controller';
+import { WhiteboardService } from './whiteboard.service';
 import { DatasetService } from './dataset.service';
 import { GisParseService } from '../services/gis-parse.service';
 import { ValidationService } from '../services/validation.service';
@@ -60,12 +62,14 @@ import { FieldStatsService } from './field-stats.service';
     ExternalDataController,
     PublicShareController,
     ProjectShareController,
+    WhiteboardController,
   ],
   providers: [
     // Core Services
     GdalService,
     DatasetService,
     ProjectShareService,
+    WhiteboardService,
     GisParseService,
     ValidationService,
     MappingProfileService,

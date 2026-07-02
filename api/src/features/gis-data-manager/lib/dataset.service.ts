@@ -753,6 +753,16 @@ export class DatasetService
         `;
       }
 
+      // 4b. 计算并写回版本 bbox：绘制保存的数据集此前从不计算 bbox，
+      // 导致 buildDatasetRoutingSummary 返回 bbox=null → 前端"缩放至图层"
+      // 拿不到范围（MVT 图层又没有本地 data 可兜底），永久卡在"加载中"。
+      // 与入库管线 gis.processor.ts 写 version.bbox 的方式一致。
+      const createdBbox = await this.computeVersionBbox(tx, version.id);
+      await tx.datasetVersion.update({
+        where: { id: version.id },
+        data: { bbox: createdBbox as Prisma.InputJsonValue },
+      });
+
       // 5. 返回完整 Dataset 信息 (使用 tx 查询)
       const fullDataset = await tx.dataset.findUnique({
         where: { id: dataset.id },
@@ -1080,6 +1090,12 @@ export class DatasetService
         ST_GeomFromText(${wkt}, 4326)
       )
     `;
+    // 新增要素可能扩大总范围 → 重新聚合版本 bbox，保持"缩放至图层"范围真实
+    const bbox = await this.computeVersionBbox(this, versionId);
+    await this.datasetVersion.update({
+      where: { id: versionId },
+      data: { bbox: bbox as Prisma.InputJsonValue },
+    });
     return { featureId };
   }
 
@@ -1098,6 +1114,42 @@ export class DatasetService
       );
     }
     return dataset.currentVersionId;
+  }
+
+  /**
+   * 计算某版本下所有要素的 bbox [minX, minY, maxX, maxY]。
+   * 用 PostGIS ST_Extent 聚合 GisFeature.geometry；事务内传 tx、事务外传 this。
+   * 无要素时返回 null（与 normalizeBbox 对 null/缺省的处理一致）。
+   */
+  private async computeVersionBbox(
+    client: Pick<PrismaClient, '$queryRaw'>,
+    versionId: string,
+  ): Promise<[number, number, number, number] | null> {
+    const rows = await client.$queryRaw<
+      { minx: number | null; miny: number | null; maxx: number | null; maxy: number | null }[]
+    >`
+      SELECT
+        ST_XMin(e.extent) AS minx,
+        ST_YMin(e.extent) AS miny,
+        ST_XMax(e.extent) AS maxx,
+        ST_YMax(e.extent) AS maxy
+      FROM (
+        SELECT ST_Extent(geometry) AS extent
+        FROM "GisFeature"
+        WHERE "versionId" = ${versionId}
+      ) AS e
+    `;
+    const r = rows[0];
+    if (
+      !r ||
+      r.minx == null ||
+      r.miny == null ||
+      r.maxx == null ||
+      r.maxy == null
+    ) {
+      return null;
+    }
+    return [Number(r.minx), Number(r.miny), Number(r.maxx), Number(r.maxy)];
   }
 
   /** 新增字段：写 DatasetField + 给当前版本所有要素补默认值（不覆盖已有 key） */
@@ -1232,7 +1284,13 @@ export class DatasetService
   // MVT Tile Generation
   // ============================================
 
-  async getMVT(versionId: string, z: number, x: number, y: number): Promise<Buffer> {
+  async getMVT(
+    versionId: string,
+    z: number,
+    x: number,
+    y: number,
+    numericFields: string[] = [],
+  ): Promise<Buffer> {
     // Use PostGIS ST_AsMVT to generate vector tile
     // Note:
     // 1. ST_TileEnvelope requires integer parameters
@@ -1247,13 +1305,20 @@ export class DatasetService
     //    per tile. A 53-bit hash of the UUID text is stable across tiles and
     //    stays within JS's safe-integer range (2^53), so the cross-tile dedup
     //    pairs the instances up -> one label per feature.
+    // 6. 数值字段在编码前强转为 numeric：属性表录入的值以字符串存入 JSONB（文本输入），
+    //    ST_AsMVT 会按 JSONB 原类型把数值字段编成字符串，导致前端 interpolate 取到字符串
+    //    而抛 "Expected value to be of type number, but found string"，分级色彩失效。
+    //    field-stats 用 (properties->>field)::numeric 算断点，此处同样强转，使瓦片属性与
+    //    断点一致，对已存的字符串数据即时生效，无需重新录入（点/线/面通用）。
+    const propertiesExpr = this.buildNumericPropertiesExpr(numericFields);
+
     const result = await this.$queryRaw`
       SELECT ST_AsMVT(tile, 'features', 4096, 'geom', 'mvt_id') as mvt
       FROM (
         SELECT
           (hashtextextended(id::text, 0) & 9007199254740991) as mvt_id,
           id as feature_id,
-          properties,
+          ${Prisma.raw(propertiesExpr)} as properties,
           ST_AsMVTGeom(
             ST_Transform(ST_SetSRID(geometry, 4326), 3857),
             ST_TileEnvelope(${z}::integer, ${x}::integer, ${y}::integer),
@@ -1268,6 +1333,28 @@ export class DatasetService
     `;
 
     return result[0]?.mvt || null;
+  }
+
+  /**
+   * 构造把数值字段强转为 numeric 的 properties 表达式片段（供 getMVT 的 SELECT 用）。
+   * - 无数值字段时直接返回 'properties'。
+   * - 仅当字段值匹配纯数字时才强转，脏值/空值落 NULL（前端 coalesce 兜底为 0），
+   *   避免单个坏值让整片瓦片崩。
+   * 字段名来自 DatasetField.name（可为任意 Unicode），按单引号字符串字面量嵌入，
+   * 转义单引号以防 SQL 注入。
+   */
+  private buildNumericPropertiesExpr(numericFields: string[]): string {
+    if (!numericFields || numericFields.length === 0) {
+      return 'properties';
+    }
+    const sqlStrLit = (s: string) => `'${s.replace(/'/g, "''")}'`;
+    const castPairs = numericFields
+      .map((f) => {
+        const lit = sqlStrLit(f);
+        return `${lit}, CASE WHEN properties->>${lit} ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (properties->>${lit})::numeric ELSE NULL END`;
+      })
+      .join(', ');
+    return `properties || jsonb_build_object(${castPairs})`;
   }
 
   // ============================================

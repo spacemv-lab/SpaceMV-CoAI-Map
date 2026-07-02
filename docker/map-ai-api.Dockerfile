@@ -56,4 +56,8 @@ RUN mkdir -p uploads
 
 EXPOSE 3000
 
-CMD npx prisma migrate deploy --schema=api/prisma/schema.prisma && node dist/api/main.js
+# 入口路径需与 tsc 产物一致：api/tsconfig.app.json 的 outDir=../dist/api + 继承的
+# rootDir=仓库根，使 api/src/main.ts 编译到 dist/api/api/src/main.js（outDir 的 api +
+# 源相对路径 api/src，故套两层）。仓库重构后产物路径变了，原先写死 dist/api/main.js
+# 会导致 Cannot find module → CrashLoopBackOff。
+CMD npx prisma migrate deploy --schema=api/prisma/schema.prisma && node dist/api/api/src/main.js

@@ -425,7 +425,19 @@ export class DatasetController {
       throw new NotFoundException(`Dataset ${id} not found or has no version`);
     }
 
-    const mvtBuffer = await this.datasetService.getMVT(dataset.currentVersionId, z, x, y);
+    // 数值字段名：MVT 编码前需把这些字段强转为 numeric（见 getMVT），否则瓦片里是字符串，
+    // 前端分级色彩的 interpolate 会抛 "Expected number, found string"。
+    const numericFields = (dataset.fields ?? [])
+      .filter((f) => f.type === 'number')
+      .map((f) => f.name);
+
+    const mvtBuffer = await this.datasetService.getMVT(
+      dataset.currentVersionId,
+      z,
+      x,
+      y,
+      numericFields,
+    );
     if (!mvtBuffer || mvtBuffer.length === 0) {
       // Return empty tile (valid MVT with no features)
       return new StreamableFile(Buffer.alloc(0));

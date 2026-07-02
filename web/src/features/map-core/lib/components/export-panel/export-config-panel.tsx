@@ -4,9 +4,15 @@
  */
 
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
+import maplibregl from 'maplibre-gl';
 import { useMapStore } from '../../store/use-map-store';
 import { ElementPresetPosition, NorthArrowStyle } from '../../types/export-state';
-import { Download, X } from 'lucide-react';
+import { Download, X, Clipboard } from 'lucide-react';
+import { composeMapImage } from '../../utils/export-compositor';
+import { setPendingMapSnapshot } from '@/features/whiteboard/lib/utils/pending-snapshot';
+import { compressImageDataUrl } from '@/features/whiteboard/lib/utils/compress-preview';
 
 // Import SVG files as URLs for preview thumbnails
 import northArrowImg1 from '../../assets/north-arrow-1.svg';
@@ -307,13 +313,27 @@ function SizeControls({
   );
 }
 
+/** 「导出到白板」的入板图压缩预设（仅影响入板图，不影响「导出 PNG」下载）。 */
+type BoardQuality = 'high' | 'standard' | 'light';
+const BOARD_QUALITY_PRESETS: Record<BoardQuality, { label: string; maxDim: number; quality: number }> = {
+  high: { label: '高清', maxDim: 2560, quality: 0.92 },
+  standard: { label: '标准', maxDim: 1600, quality: 0.85 },
+  light: { label: '轻量', maxDim: 1280, quality: 0.72 },
+};
+
 export function ExportConfigPanel() {
+  const navigate = useNavigate();
   const selectionBox = useMapStore((state) => state.exportPanel.selectionBox);
+  const config = useMapStore((state) => state.exportPanel.config);
+  const projectId = useMapStore((state) => state.currentProjectId);
   const pixelSize = useMapStore((state) => state.exportPanel.pixelSize);
   const aspectRatio = useMapStore((state) => state.exportPanel.aspectRatio);
   const setExportAspectRatio = useMapStore((state) => state.setExportAspectRatio);
   const resizeExportBox = useMapStore((state) => state.resizeExportBox);
   const closeExportPanel = useMapStore((state) => state.closeExportPanel);
+
+  // 「导出到白板」入板图压缩度（高清/标准/轻量）；仅影响入板图，不影响「导出 PNG」
+  const [boardQuality, setBoardQuality] = useState<BoardQuality>('standard');
 
   const hasBox = !!selectionBox;
 
@@ -324,6 +344,35 @@ export function ExportConfigPanel() {
       detail: { selectionBox, pixelSize }
     }));
     closeExportPanel();
+  };
+
+  // 合成图（选区 + 叠加要素烘焙）→ 存为待处理截图 → 跳白板放置
+  const handleSendToBoard = async () => {
+    const map = (window as unknown as { MAPLIBRE_MAP?: maplibregl.Map }).MAPLIBRE_MAP;
+    if (!map || !selectionBox) return;
+    try {
+      const result = await composeMapImage(map, selectionBox, config, map.getBearing());
+      if (!result) {
+        alert('导出尺寸超过限制（最大 4096×4096 像素），请缩小选择区域');
+        return;
+      }
+      // 按所选画质压缩入板图（几 MB PNG → 几百 KB JPEG），避免白板文档过大（413）
+      const compressed = await compressImageDataUrl(
+        result.dataUrl,
+        BOARD_QUALITY_PRESETS[boardQuality],
+      );
+      setPendingMapSnapshot({
+        dataUrl: compressed.dataUrl,
+        w: compressed.w || result.w,
+        h: compressed.h || result.h,
+        name: `地图 ${new Date().toLocaleString()}`,
+      });
+      closeExportPanel();
+      if (projectId) navigate(`/project/${projectId}/board`);
+    } catch (err) {
+      console.error('[ExportConfigPanel] send to board failed', err);
+      toast.error('导出到白板失败');
+    }
   };
 
   return (
@@ -366,16 +415,48 @@ export function ExportConfigPanel() {
             <ElementConfigRow label="图例" elementKey="legend" />
             <ElementConfigRow label="天地图" elementKey="tianditu" />
             <ElementConfigRow label="品牌" elementKey="brand" showTextInput />
+
+            {/* 白板画质：仅影响「导出到白板」的入板图压缩度，「导出 PNG」不受影响 */}
+            <div className="space-y-1.5 pt-1">
+              <div className="flex items-center justify-between text-xs text-slate-600">
+                <span>白板画质</span>
+                <span className="text-slate-400">
+                  最长边 {BOARD_QUALITY_PRESETS[boardQuality].maxDim}px · JPEG
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1">
+                {(Object.keys(BOARD_QUALITY_PRESETS) as BoardQuality[]).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setBoardQuality(k)}
+                    className={`px-2 py-1.5 text-xs rounded border transition-colors ${
+                      boardQuality === k
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    {BOARD_QUALITY_PRESETS[k].label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
-          {/* Export button */}
-          <div className="px-4 py-3 border-t bg-slate-50 shrink-0">
+          {/* Export buttons */}
+          <div className="px-4 py-3 border-t bg-slate-50 shrink-0 flex gap-2">
             <button
               onClick={handleExport}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-slate-900 text-white text-sm rounded hover:bg-slate-800"
+              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-slate-900 text-white text-sm rounded hover:bg-slate-800"
             >
               <Download className="w-4 h-4" />
               导出 PNG
+            </button>
+            <button
+              onClick={handleSendToBoard}
+              className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+            >
+              <Clipboard className="w-4 h-4" />
+              导出到白板
             </button>
           </div>
         </>

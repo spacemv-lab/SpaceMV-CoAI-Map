@@ -110,6 +110,10 @@ export function EditPanel() {
     setIsDeleting(true);
     try {
       await deleteFeature(layer.sourceId, selectedFeature.featureId);
+      // 强制 MapLibre 重新加载 MVT 瓦片，否则被删要素要等下次进页面才消失
+      window.dispatchEvent(
+        new CustomEvent('map:reload-mvt', { detail: { layerId: activeLayerId } })
+      );
       setActiveLayer(null);
       clearEditState();
       closeEditPanel();

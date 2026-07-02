@@ -80,9 +80,13 @@ export function GraduatedColorsPanel({ layer, config, onChange }: GraduatedColor
   // datasetId 用于 API 调用
   const datasetId = layer.sourceId;
 
-  // 当字段或分级参数变化时，调用后端 API 计算统计
+  // 当字段/分级方法/类数变化时，调用后端 API 计算统计。
+  // 用 cancelled 标志丢弃过期请求：拖动「类数」滑块会快速触发多次，若后 resolve 的旧请求
+  // 不丢弃，会把它那次（已过时的）currentConfig 连同旧类数整体写回 store，覆盖用户最新类数，
+  // 滑块便在新旧值间反复横跳。
   useEffect(() => {
     if (!currentConfig.field || !datasetId) return;
+    let cancelled = false;
 
     setIsLoading(true);
     setError(null);
@@ -93,6 +97,7 @@ export function GraduatedColorsPanel({ layer, config, onChange }: GraduatedColor
       classes: currentConfig.classes,
     })
       .then((stats) => {
+        if (cancelled) return;
         onChange({
           ...currentConfig,
           fieldStats: {
@@ -104,6 +109,7 @@ export function GraduatedColorsPanel({ layer, config, onChange }: GraduatedColor
         });
       })
       .catch((err) => {
+        if (cancelled) return;
         console.error('[GraduatedColorsPanel] Field stats failed:', err);
         setError(err.message);
 
@@ -125,34 +131,13 @@ export function GraduatedColorsPanel({ layer, config, onChange }: GraduatedColor
         }
       })
       .finally(() => {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [currentConfig.field, currentConfig.method, currentConfig.classes, datasetId]);
-
-  // 当分级方法变化时（从 API 调用中已处理，这里仅处理 fallback）
-  // 类数变化时重算断点（仅在前端 fallback 时）
-  useEffect(() => {
-    // 如果已经有后端返回的断点，不需要前端重算
-    if (currentConfig.breakpoints && currentConfig.breakpoints.length > 0 && !error) {
-      return;
-    }
-
-    // Fallback: 仅等间距方法有本地数据时
-    if (currentConfig.method !== 'equal-interval' || !currentConfig.fieldStats) {
-      return;
-    }
-
-    const breakpoints = calculateEqualIntervalBreakpoints(
-      currentConfig.fieldStats.min,
-      currentConfig.fieldStats.max,
-      currentConfig.classes,
-    );
-
-    onChange({
-      ...currentConfig,
-      breakpoints,
-    });
-  }, [currentConfig.classes]);
 
   const handleFieldChange = (field: string) => {
     // 切换字段时重置断点

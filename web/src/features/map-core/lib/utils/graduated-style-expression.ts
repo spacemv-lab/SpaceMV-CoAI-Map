@@ -45,10 +45,14 @@ export function generateGraduatedColorExpression(
   }
 
   // 构建 interpolate 表达式
+  // 新增字段对存量要素默认为 null；interpolate 直接吃 ['get', field] 遇到 null 会抛
+  // "Expected value to be of type number, but found null"，且报错的要素会被 MapLibre 当
+  // 越界值处理而回退成最大色（看起来"全是最大值颜色"）。用 coalesce 把 null 兜底为 0，
+  // 落到最小色，点/线/面通用。
   const expression: MapLibreExpression = [
     'interpolate',
     ['linear'],
-    ['get', config.field],
+    ['coalesce', ['get', config.field], 0],
   ];
 
   // 确保断点严格升序且去重
@@ -94,11 +98,11 @@ export function generateGraduatedSizeExpression(
   const min = breakpoints[0];
   const max = breakpoints[breakpoints.length - 1];
 
-  // 线性映射：field 值 → size
+  // 线性映射：field 值 → size（同色阶表达式，null 兜底为 0 避免报错/越界）
   return [
     'interpolate',
     ['linear'],
-    ['get', config.field],
+    ['coalesce', ['get', config.field], 0],
     min, minSize,
     max, maxSize,
   ];

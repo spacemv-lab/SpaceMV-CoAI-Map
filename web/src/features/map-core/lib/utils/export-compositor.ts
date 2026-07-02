@@ -24,78 +24,56 @@ function computeMetersPerPixel(zoom: number, lat: number): number {
 }
 
 /**
- * Export map with box selection and map elements
+ * 合成导出图（选区裁剪 + 叠加要素：标题/指北针/比例尺/图例/天地图/品牌）。
+ * 返回 { dataUrl, w, h }；尺寸超限或拿不到 ctx 返回 null（由调用方决定提示）。
+ * 不触发下载——供「导出 PNG」（下载）与「导出到白板」（送白板）共用。
  */
-export async function exportMapImage(
+export async function composeMapImage(
   map: maplibregl.Map,
   selectionBox: NonNullable<ExportPanelState['selectionBox']>,
   config: ExportConfig,
   bearing: number
-): Promise<void> {
+): Promise<{ dataUrl: string; w: number; h: number } | null> {
   // Force render to ensure canvas has content
   map.triggerRepaint();
 
   // Wait for render to complete
   await new Promise<void>((resolve) => {
     map.once('render', () => resolve());
-    // Timeout fallback in case render doesn't fire
     setTimeout(() => resolve(), 100);
   });
 
-  // Get map canvas
   const mapCanvas = map.getCanvas();
-  const mapWidth = mapCanvas.width;
-  const mapHeight = mapCanvas.height;
 
   // Calculate selection in canvas coordinates (CSS to canvas pixel ratio)
   const pixelRatio = window.devicePixelRatio || 1;
-
   const canvasX1 = Math.round(selectionBox.startX * pixelRatio);
   const canvasY1 = Math.round(selectionBox.startY * pixelRatio);
   const canvasX2 = Math.round(selectionBox.endX * pixelRatio);
   const canvasY2 = Math.round(selectionBox.endY * pixelRatio);
-
-
   const exportWidth = canvasX2 - canvasX1;
   const exportHeight = canvasY2 - canvasY1;
 
-  // Check size limits
   if (exportWidth > 4096 || exportHeight > 4096) {
-    alert('导出尺寸超过限制（最大 4096×4096 像素），请缩小选择区域');
-    return;
+    return null;
   }
 
-  // Create export canvas
   const exportCanvas = document.createElement('canvas');
   exportCanvas.width = exportWidth;
   exportCanvas.height = exportHeight;
   const ctx = exportCanvas.getContext('2d');
-
   if (!ctx) {
-    console.error('Failed to get 2D context');
-    return;
+    return null;
   }
 
   // Draw map region
-  ctx.drawImage(
-    mapCanvas,
-    canvasX1,
-    canvasY1,
-    exportWidth,
-    exportHeight,
-    0,
-    0,
-    exportWidth,
-    exportHeight
-  );
+  ctx.drawImage(mapCanvas, canvasX1, canvasY1, exportWidth, exportHeight, 0, 0, exportWidth, exportHeight);
 
-  // Get current zoom and center for scale calculation
+  // Scale + legend
   const center = map.getCenter();
   const zoom = map.getZoom();
   const metersPerPixel = computeMetersPerPixel(zoom, center.lat);
-
-  // Get visible layers for legend
-  const layers = useMapStore.getState().layers.filter(l => l.visible);
+  const layers = useMapStore.getState().layers.filter((l) => l.visible);
 
   // Preload north arrow SVG if enabled
   let northArrowImage: HTMLImageElement | null = null;
@@ -125,14 +103,27 @@ export async function exportMapImage(
   drawTianditu(ctx, config.tianditu, exportWidth, exportHeight, tiandituLogoImage);
   drawBrand(ctx, config.brand, exportWidth, exportHeight);
 
-  // Export to PNG
-  const mimeType = 'image/png';
-  const image = exportCanvas.toDataURL(mimeType, 1.0);
+  return { dataUrl: exportCanvas.toDataURL('image/png', 1.0), w: exportWidth, h: exportHeight };
+}
 
-  // Download
+/**
+ * Export map with box selection and map elements → 下载 PNG。
+ * 行为不变：合成（composeMapImage）+ 触发下载；超限弹窗提示。
+ */
+export async function exportMapImage(
+  map: maplibregl.Map,
+  selectionBox: NonNullable<ExportPanelState['selectionBox']>,
+  config: ExportConfig,
+  bearing: number
+): Promise<void> {
+  const result = await composeMapImage(map, selectionBox, config, bearing);
+  if (!result) {
+    alert('导出尺寸超过限制（最大 4096×4096 像素），请缩小选择区域');
+    return;
+  }
   const link = document.createElement('a');
   link.download = `map-export-${Date.now()}.png`;
-  link.href = image;
+  link.href = result.dataUrl;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

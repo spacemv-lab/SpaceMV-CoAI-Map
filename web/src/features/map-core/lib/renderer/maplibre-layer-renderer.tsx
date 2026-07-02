@@ -408,7 +408,15 @@ function getIconNameExpression(layer: LayerState): string | unknown[] {
  * 更新编辑 source 数据（含节点手柄）
  */
 function updateEditSource(map: maplibregl.Map, feature: import('geojson').Feature | null) {
-  const source = map.getSource(EDIT_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+  let source = map.getSource(EDIT_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+  if (!source) {
+    // 没有要素要显示就不必创建 source（避免只读分享页无谓创建）
+    if (!feature) return;
+    // source 可能因底图切换被 map.setStyle() 清掉（initEditLayer 只在 viewerReady 时调一次，
+    // 不会重跑）。进编辑时按需重建，否则编辑要素画不出来、"mvt 消失但编辑要素不出现"。
+    initEditLayer(map);
+    source = map.getSource(EDIT_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+  }
   if (!source) return;
 
   if (!feature) {
@@ -1815,7 +1823,14 @@ export function MapLibreLayerRenderer() {
       const clickPoint = { x: e.point.x, y: e.point.y };
       const clickLngLat = [e.lngLat.lng, e.lngLat.lat] as [number, number];
 
-      // 延迟处理 click，等待 dblclick 取消
+      // 编辑会话内：单击即切要素，立即处理（编辑会话无弹框，无需为 dblclick 让路延迟）
+      const clickState = useMapStore.getState();
+      if (clickState.activeLayerId && clickState.edit.editFeature) {
+        handleClickAction(clickPoint, clickLngLat);
+        return;
+      }
+
+      // 浏览态：延迟处理 click，等待 dblclick 取消（单击弹框 / 双击进编辑）
       if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
       clickTimerRef.current = setTimeout(() => {
         handleClickAction(clickPoint, clickLngLat);
@@ -1878,7 +1893,26 @@ export function MapLibreLayerRenderer() {
         }
 
         // 检测是否点击了其他 MVT 要素 → 切换编辑
-        const mvtFeatures = currentMap.queryRenderedFeatures(point as any);
+        // 用 bbox 命中盒绕开 queryRenderedFeatures(point) 对 vector/fill“返回整片瓦片要素”
+        // 的 bug；只保留数据集图层 source（store 图层 id 集合），自动排除底图/标注/编辑叠加层；
+        // 按 feature_id 跨瓦片去重；几何无关（点/线/面均可用）。
+        const datasetSourceIds = new Set(
+          useMapStore.getState().layers.filter((l) => l.type === 'GeoJSON').map((l) => l.id),
+        );
+        const switchHitbox: [number, number, number, number] = [
+          point.x - 1,
+          point.y - 1,
+          point.x + 1,
+          point.y + 1,
+        ];
+        const mvtFeatures = [
+          ...new Map(
+            currentMap
+              .queryRenderedFeatures(switchHitbox as any)
+              .filter((f) => datasetSourceIds.has(f.layer?.source as string))
+              .map((f) => [f.properties?.feature_id ?? f.properties?.id, f]),
+          ).values(),
+        ];
         if (mvtFeatures.length > 0) {
           const mvtFeature = mvtFeatures[0];
           const layerId = mvtFeature.layer?.source;
@@ -2159,16 +2193,18 @@ export function MapLibreLayerRenderer() {
           }
         }
 
-        // 更新 hover state
+        // 更新 hover state。编辑 source 可能因底图切换被 setStyle 清空，
+        // setFeatureState 前必须判存在，否则抛 "The source '__edit-feature__' does not exist"
+        const editSourceExists = !!map.getSource(EDIT_SOURCE_ID);
         const prevIdx = hoveredNodeIdxRef.current;
         if (newHoveredIdx !== prevIdx) {
-          if (prevIdx !== null) {
+          if (editSourceExists && prevIdx !== null) {
             map.setFeatureState(
               { source: EDIT_SOURCE_ID, id: prevIdx + 10000 },
               { hovered: false }
             );
           }
-          if (newHoveredIdx !== null) {
+          if (editSourceExists && newHoveredIdx !== null) {
             map.setFeatureState(
               { source: EDIT_SOURCE_ID, id: newHoveredIdx + 10000 },
               { hovered: true }
@@ -2185,10 +2221,12 @@ export function MapLibreLayerRenderer() {
       } else {
         // 清除 hover state
         if (hoveredNodeIdxRef.current !== null) {
-          map.setFeatureState(
-            { source: EDIT_SOURCE_ID, id: hoveredNodeIdxRef.current + 10000 },
-            { hovered: false }
-          );
+          if (map.getSource(EDIT_SOURCE_ID)) {
+            map.setFeatureState(
+              { source: EDIT_SOURCE_ID, id: hoveredNodeIdxRef.current + 10000 },
+              { hovered: false }
+            );
+          }
           hoveredNodeIdxRef.current = null;
         }
         const features = map.queryRenderedFeatures(e.point);

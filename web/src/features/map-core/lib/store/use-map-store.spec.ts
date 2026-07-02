@@ -247,6 +247,25 @@ describe('useMapStore - Style Panel Actions', () => {
     });
   });
 
+  describe('setActiveLayer', () => {
+    it('resets interaction.mode to default when leaving the edit session', () => {
+      const store = useMapStore.getState();
+      store.addLayer(mockLayer);
+      store.setActiveLayer(mockLayer.id);
+      // 模拟绘制会话：进入 draw 模式（绘制后并不自动复位）
+      store.setInteractionMode('draw_point');
+      expect(useMapStore.getState().interaction.mode).toBe('draw_point');
+
+      // 停止编辑 / 关面板 / 双击空白 / Esc 等退出路径都走 setActiveLayer(null)
+      store.setActiveLayer(null);
+
+      // 残留的 draw_* 必须被复位，否则「双击要素进入编辑」的守卫
+      // （mode !== 'default' 即 return）会永久失效，只剩增量绘制能用
+      expect(useMapStore.getState().activeLayerId).toBe(null);
+      expect(useMapStore.getState().interaction.mode).toBe('default');
+    });
+  });
+
   describe('attribute panel actions', () => {
     beforeEach(() => {
       useMapStore.getState().addLayer(mockLayer);

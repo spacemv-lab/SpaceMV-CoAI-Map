@@ -22,20 +22,44 @@ function createService() {
     update: jest.fn(),
     delete: jest.fn(),
   };
-  const dataset = { findUnique: jest.fn() };
+  const datasetVersion = {
+    create: jest.fn(),
+    update: jest.fn(),
+  };
+  const dataset = {
+    findUnique: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+  };
   const execRaw = jest.fn().mockResolvedValue(1);
-  const txMock = { datasetField, dataset, $executeRaw: execRaw };
+  // computeVersionBbox 的 ST_Extent 默认返回一个有效 bbox 行
+  const queryRaw = jest.fn().mockResolvedValue([
+    { minx: 1, miny: 2, maxx: 3, maxy: 4 },
+  ]);
+  const txMock = {
+    datasetField,
+    dataset,
+    datasetVersion,
+    $executeRaw: execRaw,
+    $queryRaw: queryRaw,
+  };
 
   const service = Object.create(DatasetService.prototype) as DatasetService;
   Object.assign(service, {
     datasetField,
     dataset,
+    datasetVersion,
     $executeRaw: execRaw,
+    $queryRaw: queryRaw,
+    // buildDatasetRoutingSummary → classifyComplexity 读这两个实例阈值；
+    // Object.create(prototype) 不跑字段初始化，需手动补上（取自类定义）
+    complexityFileSizeThresholdsMb: [1, 5, 20, 80],
+    complexityRecordThresholds: [1000, 5000, 20000, 100000],
     $transaction: jest.fn(async (cb: (tx: typeof txMock) => Promise<unknown>) =>
       cb(txMock),
     ),
   });
-  return { service, datasetField, dataset, execRaw };
+  return { service, datasetField, dataset, datasetVersion, execRaw, queryRaw };
 }
 
 describe('DatasetService field & properties', () => {
@@ -179,6 +203,24 @@ describe('DatasetService field & properties', () => {
       expect(res).toEqual({ featureId: 'f-1' });
     });
 
+    it('refreshes the version bbox after insert (keeps zoom-to-layer range truthful)', async () => {
+      const { service, dataset, datasetVersion, queryRaw } = createService();
+      dataset.findUnique.mockResolvedValue({ currentVersionId: 'ver-1' });
+
+      await service.createFeature('ds-1', {
+        id: 'f-1',
+        geometry: { type: 'Point', coordinates: [0, 0] },
+      });
+
+      expect(queryRaw).toHaveBeenCalledTimes(1);
+      expect(datasetVersion.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'ver-1' },
+          data: expect.objectContaining({ bbox: [1, 2, 3, 4] }),
+        }),
+      );
+    });
+
     it('generates an id when none is provided', async () => {
       const { service, dataset } = createService();
       dataset.findUnique.mockResolvedValue({ currentVersionId: 'ver-1' });
@@ -200,6 +242,54 @@ describe('DatasetService field & properties', () => {
           geometry: { type: 'Point', coordinates: [0, 0] },
         }),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('createDatasetWithFeatures', () => {
+    it('computes the version bbox from inserted features and returns it', async () => {
+      const { service, dataset, datasetVersion, queryRaw } = createService();
+      dataset.create.mockResolvedValue({ id: 'ds-1' });
+      datasetVersion.create.mockResolvedValue({ id: 'ver-1' });
+      dataset.findUnique.mockResolvedValue({
+        id: 'ds-1',
+        type: 'POINT',
+        currentVersionId: 'ver-1',
+        currentVersion: {
+          id: 'ver-1',
+          status: 'SUCCESS',
+          recordCount: 1,
+          fileSize: 0,
+          bbox: [1, 2, 3, 4],
+        },
+        versions: [
+          {
+            id: 'ver-1',
+            status: 'SUCCESS',
+            recordCount: 1,
+            fileSize: 0,
+            bbox: [1, 2, 3, 4],
+          },
+        ],
+      });
+
+      const res = await service.createDatasetWithFeatures({
+        name: '标注',
+        geometryType: 'POINT' as any,
+        features: [
+          { id: 'f-1', geometry: { type: 'Point', coordinates: [1, 2] } },
+        ],
+      });
+
+      // 创建后用 ST_Extent 补算 bbox 并写回版本
+      expect(queryRaw).toHaveBeenCalledTimes(1);
+      expect(datasetVersion.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'ver-1' },
+          data: expect.objectContaining({ bbox: [1, 2, 3, 4] }),
+        }),
+      );
+      // 返回的 routing summary 带真实 bbox（前端 routingMetadata.bbox 即此）
+      expect(res.bbox).toEqual([1, 2, 3, 4]);
     });
   });
 });

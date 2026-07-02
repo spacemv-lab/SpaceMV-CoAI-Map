@@ -65,6 +65,7 @@ model Project {
   datasets    Dataset[]
   state       ProjectState?
   shares      ProjectShare[] @relation("ProjectShares")
+  whiteboard  WhiteboardDoc?
 }
 
 // 项目公开分享链接：匿名、只读、可嵌入的地图分享
@@ -92,6 +93,20 @@ model ProjectState {
   layers      Json     // LayerState 数组（含 Draw GeoJSON 数据）
   updatedAt   DateTime @updatedAt
   createdAt   DateTime @default(now())
+
+  @@index([projectId])
+}
+
+// 项目白板：一站式配图（tldraw 画布文档）
+// 一个项目一份 tldraw 文档（内部已支持多页），document 存 editor.getSnapshot()（含 base64 地图截图）
+model WhiteboardDoc {
+  id             String   @id @default(uuid())
+  projectId      String   @unique
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  document       Json     // tldraw getSnapshot()
+  previewDataUrl String?  // 发布的预览图 PNG dataURL，供其他服务经 GET .../whiteboard/image 取用
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([projectId])
 }
