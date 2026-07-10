@@ -53,7 +53,7 @@ export class ShapefileAdapter extends BaseAdapter {
       const gdalAvailable = await this.gdalService.isAvailable();
       if (!gdalAvailable) {
         throw new Error(
-          'GDAL not available locally or through Docker; check GDAL_MODE / GDAL_DOCKER_IMAGE',
+          'GDAL not available; api 镜像须 apt install gdal-bin (ogr2ogr 不在 PATH)',
         );
       }
 
@@ -332,7 +332,7 @@ export class ShapefileAdapter extends BaseAdapter {
       geometryType: result.geometryType,
       bbox: result.bbox,
       sourceCRS: result.sourceCRS,
-      parser: this.gdalService.getBackend() === 'docker' ? 'GDAL(Docker)' : this.gdalService.isAvailableSync() ? 'GDAL(Local)' : 'shpjs',
+      parser: this.gdalService.isAvailableSync() ? 'GDAL(Local)' : 'shpjs',
     };
   }
 

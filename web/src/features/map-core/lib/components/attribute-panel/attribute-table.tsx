@@ -3,7 +3,7 @@
  * This project is licensed under the MIT License - see the LICENSE file in the project root for details.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useMapStore } from '../../store/use-map-store';
 import {
   CheckSquare,
@@ -13,6 +13,7 @@ import {
   ChevronUp,
   Filter,
   ListChecks,
+  Loader2,
   LocateFixed,
   Search,
   Square,
@@ -20,9 +21,14 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { fetchFeaturesList, FeatureRow } from '../../api/dataset-api';
-import { fetchFeatureGeoJSON, updateFeatureProperties } from '@/features/gis-data-manager/feature-api';
+import {
+  fetchFeatureGeoJSON,
+  updateFeatureProperties,
+  uploadDatasetImage,
+} from '@/features/gis-data-manager/feature-api';
 import { flyToGeometry } from '../../utils/fly-to-feature';
 import { FilterBar } from './filter-bar';
+import { PropertyValueRenderer } from '../property-value-renderer';
 
 interface AttributeTableProps {
   layerId: string;
@@ -89,12 +95,15 @@ export function AttributeTable({ layerId }: AttributeTableProps) {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
+  const [uploadingCell, setUploadingCell] = useState<string | null>(null);
   const [selectedFeatureIds, setSelectedFeatureIds] = useState<Set<string>>(new Set());
   const [filterFn, setFilterFn] = useState<((feature: any) => boolean) | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
   const [sort, setSort] = useState<SortState>({ field: null, direction: 'asc' });
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingImageRef = useRef<{ featureId: string; fieldName: string } | null>(null);
 
   // API 数据源状态（用于 MVT 瓦片图层）
   const [apiState, setApiState] = useState<ApiFetchState>({
@@ -280,6 +289,46 @@ export function AttributeTable({ layerId }: AttributeTableProps) {
     }
   };
 
+  // image 字段：上传图片到 MinIO → objectKey 写进该要素 properties（复用保存链路）
+  const handleUploadImage = async (featureId: string, fieldName: string, file: File) => {
+    if (!datasetId) {
+      toast.error('该图层无数据源，无法上传');
+      return;
+    }
+    setUploadingCell(`${featureId}:${fieldName}`);
+    try {
+      const { key } = await uploadDatasetImage(datasetId, file);
+      if (hasLocalData) {
+        updateLayerFeature(layerId, featureId, { [fieldName]: key });
+      } else {
+        const row = apiState.rows.find((item) => item.id === featureId);
+        const merged = { ...(row?.properties || {}), [fieldName]: key };
+        await updateFeatureProperties(datasetId, featureId, merged);
+        setApiState((s) => ({
+          ...s,
+          rows: s.rows.map((item) =>
+            item.id === featureId ? { ...item, properties: merged } : item,
+          ),
+        }));
+      }
+      toast.success('图片已上传');
+    } catch {
+      toast.error('上传失败');
+    } finally {
+      setUploadingCell(null);
+    }
+  };
+
+  // 共用一个隐藏 file input：双击 image 单元格时记下目标，选完文件触发上传
+  const handleFilePicked = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const pending = pendingImageRef.current;
+    pendingImageRef.current = null;
+    e.target.value = '';
+    if (!file || !pending) return;
+    await handleUploadImage(pending.featureId, pending.fieldName, file);
+  };
+
   // 点表头切换排序：同列升降序切换，换列从升序开始
   const handleSortClick = (field: string) => {
     setSort((prev) =>
@@ -421,6 +470,15 @@ export function AttributeTable({ layerId }: AttributeTableProps) {
         )}
       </div>
 
+      {/* image 字段共用的隐藏文件选择器（双击 image 单元格触发） */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFilePicked}
+      />
+
       {/* 表格 */}
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full min-w-max text-left text-sm">
@@ -527,22 +585,49 @@ export function AttributeTable({ layerId }: AttributeTableProps) {
                     const isEditing =
                       editingCell?.featureId === feature.id &&
                       editingCell.fieldName === field.name;
+                    const isImage = field.type === 'image';
+                    const isUploading = uploadingCell === cellKey;
+                    const rawValue = feature.properties?.[field.name];
 
                     return (
                       <td
                         key={cellKey}
-                        title="双击编辑"
+                        title={isImage ? '双击上传图片' : '双击编辑'}
                         className="max-w-[220px] cursor-text px-3 py-1.5 text-slate-700"
                         onDoubleClick={(event) => {
                           event.stopPropagation();
+                          if (isImage) {
+                            // image 字段双击 → 触发共用文件选择器（不经文本编辑态）
+                            pendingImageRef.current = {
+                              featureId: feature.id,
+                              fieldName: field.name,
+                            };
+                            fileInputRef.current?.click();
+                            return;
+                          }
                           setEditingCell({
                             featureId: feature.id,
                             fieldName: field.name,
-                            value: String(feature.properties?.[field.name] ?? ''),
+                            value: String(rawValue ?? ''),
                           });
                         }}
                       >
-                        {isEditing ? (
+                        {isImage ? (
+                          isUploading ? (
+                            <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+                          ) : isEmpty(rawValue) ? (
+                            <span className="text-slate-300">双击上传</span>
+                          ) : datasetId ? (
+                            <PropertyValueRenderer
+                              value={rawValue}
+                              type="image"
+                              datasetId={datasetId}
+                              imgClassName="h-6 w-6 object-cover rounded"
+                            />
+                          ) : (
+                            <span className="block truncate">{String(rawValue)}</span>
+                          )
+                        ) : isEditing ? (
                           <input
                             autoFocus
                             value={editingCell.value}
@@ -565,7 +650,7 @@ export function AttributeTable({ layerId }: AttributeTableProps) {
                           />
                         ) : (
                           <span className="block truncate">
-                            {String(feature.properties?.[field.name] ?? '') || '-'}
+                            {String(rawValue ?? '') || '-'}
                           </span>
                         )}
                       </td>

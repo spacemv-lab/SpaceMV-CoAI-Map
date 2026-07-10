@@ -111,6 +111,43 @@ model WhiteboardDoc {
   @@index([projectId])
 }
 
+// 白板模板：保存的画板快照（shapes + assets）+ 名称 + 缩略图，所有登录用户共享可见，owner 可删。
+// 不挂 Project（跨项目共享）；content 与 thumbnailUrl 均自包含（JSON / dataURL），无外部依赖。
+model WhiteboardTemplate {
+  id           String   @id @default(uuid())
+  name         String
+  ownerId      String                          // 创建者 userId（删除权限依据）
+  content      Json     // { assets: TLAsset[], shapes: TLShape[] } captureTemplateSnapshot 产物
+  thumbnailUrl String?  // 缩略图 JPEG dataURL（与 WhiteboardDoc.previewDataUrl 同机制）
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([ownerId])
+}
+
+// 瓦片源：天地图 token（kind='tianditu'）/ GeoTIFF COG（kind='titiler-cog'，二期）/ 通用 XYZ/WMTS（二期）
+// credential 加密存第三方 token（AES-256-GCM，密钥 TILE_SOURCE_ENCRYPTION_KEY），仅 owner 可解
+// tianditu「每用户一份」由 service 层 upsert 保证（不在模型层 unique，以免挡住二期一人多 COG 源）
+model TileSource {
+  id         String       @id @default(uuid())
+  name       String
+  scope      DatasetScope @default(GLOBAL)
+  ownerId    String
+  kind       String   // 'tianditu' | 'titiler-cog' | 'xyz' | 'wmts'
+  config        Json
+  credential    Json?
+  objectKey     String?   // kind=titiler-cog:MinIO 对象 key(转码前=原档,转码后=COG)
+  // COG 转码状态(仅 kind='titiler-cog' 用;tianditu 恒 READY)
+  // PENDING(刚上传)→ PROCESSING(转码中)→ READY / FAILED
+  ingestStatus  String   @default("READY")
+  statusMessage String?
+  createdAt     DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([scope, ownerId])
+  @@index([ownerId, kind])
+}
+
 // 数据集：逻辑上的数据集合
 model Dataset {
   id               String           @id @default(uuid())

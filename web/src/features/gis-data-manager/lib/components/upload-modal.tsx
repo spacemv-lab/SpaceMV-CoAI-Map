@@ -21,6 +21,7 @@ import { useDropzone } from 'react-dropzone';
 import { cn } from '../utils';
 import { DatasetScope } from '../types';
 import { datasetApi } from '../api/dataset.api';
+import { TableColumnPicker, type TableConfig } from './table-column-picker';
 
 interface UploadModalProps {
   /**
@@ -59,6 +60,11 @@ const ALLOWED_EXTENSIONS = {
 
 const SUPPORTED_FORMATS = ['.geojson', '.json', '.zip', '.csv', '.xls', '.xlsx', '.kml', '.kmz'];
 
+function isTableFile(file: File): boolean {
+  const n = file.name.toLowerCase();
+  return n.endsWith('.csv') || n.endsWith('.xls') || n.endsWith('.xlsx');
+}
+
 /**
  * UploadModal Component
  *
@@ -83,6 +89,7 @@ export function UploadModal({
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'processing' | 'success' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
+  const [tableConfig, setTableConfig] = useState<TableConfig | null>(null);
 
   // Reset state when modal opens/closes
   const handleOpenChange = (newOpen: boolean) => {
@@ -98,6 +105,7 @@ export function UploadModal({
       setError(null);
       setUploadStatus('idle');
       setVersionId(null);
+      setTableConfig(null);
     }
     onOpenChange(newOpen);
   };
@@ -156,6 +164,18 @@ export function UploadModal({
 
     if (tags) {
       tags.split(',').forEach((tag) => formData.append('tags', tag.trim()));
+    }
+
+    // 表格列指认（csv/xls/xlsx）：透传到后端 TableAdapter.parse
+    if (tableConfig) {
+      if (tableConfig.headerRow !== undefined) {
+        formData.append('headerRow', String(tableConfig.headerRow));
+      }
+      if (tableConfig.sheet) formData.append('sheet', tableConfig.sheet);
+      if (tableConfig.latColumn) formData.append('latitudeColumn', tableConfig.latColumn);
+      if (tableConfig.lonColumn) formData.append('longitudeColumn', tableConfig.lonColumn);
+      if (tableConfig.geometryColumn) formData.append('geometryColumn', tableConfig.geometryColumn);
+      if (tableConfig.wktColumn) formData.append('wktColumn', tableConfig.wktColumn);
     }
 
     try {
@@ -292,6 +312,11 @@ export function UploadModal({
                 </Button>
               )}
             </div>
+          )}
+
+          {/* 表格列指认（csv/xls/xlsx） */}
+          {file && isTableFile(file) && (
+            <TableColumnPicker file={file} onChange={(cfg) => setTableConfig(cfg)} />
           )}
 
           {/* Dataset Name */}

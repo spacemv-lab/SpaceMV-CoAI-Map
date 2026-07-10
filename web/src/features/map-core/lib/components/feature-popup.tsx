@@ -16,12 +16,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
-import { SelectionState } from '../types/map-state';
+import { SelectionState, LayerFieldDefinition } from '../types/map-state';
 import { useMapStore } from '../store/use-map-store';
 import {
   fetchFeatureDetail,
   FeatureDetailResponse,
 } from '@/features/gis-data-manager/feature-api';
+import { buildImageUrl } from './property-value-renderer';
 
 interface FeaturePopupProps {
   selection: SelectionState;
@@ -38,14 +39,20 @@ function renderPropertiesTable(
   onExpand?: () => void,
   editable?: boolean,
   onPropertyChange?: (key: string, value: unknown) => void,
+  fields?: LayerFieldDefinition[],
+  datasetId?: string,
 ): HTMLElement {
   const container = document.createElement('div');
   container.className = 'max-h-60 overflow-y-auto min-w-[280px]';
 
-  const totalKeys = Object.keys(properties).length;
-  const entries = expanded
-    ? Object.entries(properties)
-    : Object.entries(properties).slice(0, 15);
+  // 优先按字段 schema 渲染（空值字段也显示）；schema 缺失时退回裸 properties
+  const fieldEntries: Array<{ key: string; type?: string }> =
+    fields && fields.length > 0
+      ? fields.map((f) => ({ key: f.name, type: f.type }))
+      : Object.keys(properties).map((key) => ({ key }));
+
+  const totalKeys = fieldEntries.length;
+  const entries = expanded ? fieldEntries : fieldEntries.slice(0, 15);
 
   if (entries.length === 0) {
     container.innerHTML =
@@ -56,7 +63,8 @@ function renderPropertiesTable(
   const table = document.createElement('table');
   table.className = 'w-full text-xs border-collapse';
 
-  for (const [key, value] of entries) {
+  for (const { key, type } of entries) {
+    const value = properties[key];
     const tr = document.createElement('tr');
     tr.className = 'border-b border-gray-100';
 
@@ -69,7 +77,7 @@ function renderPropertiesTable(
     tdValue.className = `text-gray-800 py-1.5 px-2 break-all align-top${editable ? ' cursor-text hover:bg-blue-50' : ''}`;
 
     if (editable && onPropertyChange) {
-      // 编辑模式：使用 input 元素
+      // 编辑模式：input text（image 字段在 edit-panel 上传，弹窗此处显示 key 文本）
       const input = document.createElement('input');
       input.type = 'text';
       input.value = typeof value === 'object'
@@ -88,10 +96,8 @@ function renderPropertiesTable(
       });
       tdValue.appendChild(input);
     } else {
-      tdValue.textContent =
-        typeof value === 'object'
-          ? JSON.stringify(value)
-          : String(value ?? '-');
+      // 只读：按字段类型分发（image→缩略图 / url→链接 / date→格式化）
+      appendReadOnlyValue(tdValue, value, type, datasetId);
     }
 
     tr.appendChild(tdKey);
@@ -115,6 +121,55 @@ function renderPropertiesTable(
   return container;
 }
 
+/** 只读属性值按类型渲染进 td（image 走下载代理 endpoint 取图） */
+function appendReadOnlyValue(
+  td: HTMLTableCellElement,
+  value: unknown,
+  type: string | undefined,
+  datasetId?: string,
+): void {
+  if (value === null || value === undefined || value === '') {
+    td.textContent = '-';
+    return;
+  }
+
+  if (type === 'image' && datasetId) {
+    const src = buildImageUrl(datasetId, String(value));
+    const a = document.createElement('a');
+    a.href = src;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = '';
+    img.className = 'h-12 w-12 object-cover rounded inline-block';
+    a.appendChild(img);
+    td.appendChild(a);
+    return;
+  }
+
+  if (type === 'url') {
+    const href = String(value);
+    const a = document.createElement('a');
+    a.href = href;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = href;
+    a.className = 'text-blue-600 hover:underline break-all';
+    td.appendChild(a);
+    return;
+  }
+
+  if (type === 'date') {
+    const d = new Date(String(value));
+    td.textContent = isNaN(d.getTime()) ? String(value) : d.toLocaleDateString();
+    return;
+  }
+
+  td.textContent =
+    typeof value === 'object' ? JSON.stringify(value) : String(value);
+}
+
 export function FeaturePopup({ selection, map }: FeaturePopupProps) {
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const [loading, setLoading] = useState(false);
@@ -126,6 +181,7 @@ export function FeaturePopup({ selection, map }: FeaturePopupProps) {
   const editFeature = useMapStore((state) => state.edit.editFeature);
   const setEditFeature = useMapStore((state) => state.setEditFeature);
   const setHasUnsavedChanges = useMapStore((state) => state.setHasUnsavedChanges);
+  const layers = useMapStore((state) => state.layers);
   const isEditMode = editFeature !== null;
 
   // 清理 Popup
@@ -215,6 +271,13 @@ export function FeaturePopup({ selection, map }: FeaturePopupProps) {
   useEffect(() => {
     if (!popupRef.current) return;
 
+    // 取图层字段 schema + datasetId（用于按类型渲染，如 image 缩略图）
+    const layer = selection?.layerId
+      ? layers.find((l) => l.id === selection.layerId)
+      : undefined;
+    const fields = layer?.fields;
+    const datasetId = selection?.datasetId;
+
     if (loading) {
       popupRef.current.setDOMContent(
         createPopupContent(
@@ -260,6 +323,8 @@ export function FeaturePopup({ selection, map }: FeaturePopupProps) {
             setEditFeature(updated);
             setHasUnsavedChanges(true);
           },
+          fields,
+          datasetId,
         ),
       );
       popupRef.current.setDOMContent(contentEl);
@@ -271,11 +336,19 @@ export function FeaturePopup({ selection, map }: FeaturePopupProps) {
       const title = `要素 ID: ${data.featureId}`;
       const contentEl = createPopupContent(title);
       contentEl.appendChild(
-        renderPropertiesTable(data.properties, expanded, () => setExpanded(true)),
+        renderPropertiesTable(
+          data.properties,
+          expanded,
+          () => setExpanded(true),
+          false,
+          undefined,
+          fields,
+          datasetId,
+        ),
       );
       popupRef.current.setDOMContent(contentEl);
     }
-  }, [loading, error, data, selection.featureId, expanded, isEditMode, editFeature, setEditFeature, setHasUnsavedChanges]);
+  }, [loading, error, data, selection?.featureId, selection?.layerId, selection?.datasetId, layers, expanded, isEditMode, editFeature, setEditFeature, setHasUnsavedChanges]);
 
   return null;
 }

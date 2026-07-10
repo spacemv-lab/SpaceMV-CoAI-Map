@@ -14,6 +14,7 @@ import {
   _Object,
 } from '@aws-sdk/client-s3';
 import * as fs from 'fs/promises';
+import { createReadStream, createWriteStream } from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as os from 'os';
@@ -191,6 +192,42 @@ export class MinioService implements OnModuleInit {
   }
 
   /**
+   * Upload a file (by local path) to MinIO via stream —— 适合大文件(GeoTIFF/COG),
+   * 不把整个文件读进内存。
+   */
+  async uploadFileFromPath(
+    key: string,
+    filePath: string,
+    contentType?: string,
+  ): Promise<UploadResult> {
+    await this.ensureInitialized();
+
+    if (!this.initialized) {
+      throw new Error('MinIO service not initialized');
+    }
+
+    try {
+      const stat = await fs.stat(filePath);
+      const command = new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: createReadStream(filePath),
+        ContentType: contentType,
+        ContentLength: stat.size,
+      });
+      const result = await this.s3Client.send(command);
+      this.logger.log(`File uploaded to MinIO (stream): ${key} (${stat.size} bytes)`);
+      return {
+        key,
+        etag: result.ETag?.replace(/"/g, ''),
+      };
+    } catch (error) {
+      this.logger.error(`Failed to upload file (stream) to MinIO: ${key}`, error);
+      throw new Error(`MinIO upload failed: ${error.message}`);
+    }
+  }
+
+  /**
    * Download a file from MinIO to a temporary file
    * Returns the file path and a cleanup function
    */
@@ -215,16 +252,15 @@ export class MinioService implements OnModuleInit {
       const tempFileName = `download-${Date.now()}${ext}`;
       const filePath = path.join(tempDir, tempFileName);
 
-      // Stream to file
-      const stream = response.Body as any;
-      const chunks: Buffer[] = [];
-
-      for await (const chunk of stream) {
-        chunks.push(chunk);
-      }
-
-      const buffer = Buffer.concat(chunks);
-      await fs.writeFile(filePath, buffer);
+      // 流式落盘(不把整文件读进内存——大文件 buffer+toString 会撞 V8 字符串上限)
+      const body = response.Body as NodeJS.ReadableStream;
+      const writeStream = createWriteStream(filePath);
+      await new Promise<void>((resolve, reject) => {
+        body.pipe(writeStream);
+        writeStream.on('finish', resolve);
+        writeStream.on('error', reject);
+        body.on('error', reject);
+      });
 
       this.logger.log(`File downloaded from MinIO to temp: ${filePath}`);
 
@@ -241,11 +277,47 @@ export class MinioService implements OnModuleInit {
       return {
         filePath,
         cleanup,
-        content: buffer.toString('utf-8'),
       };
     } catch (error) {
       this.logger.error(`Failed to download file from MinIO: ${key}`, error);
       throw new Error(`MinIO download failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * 读取对象为内存 Buffer（供图片下载代理用；仅适合小文件如要素图片，
+   * 大文件请用 downloadToTempFile 流式落盘避免撑爆内存）。
+   */
+  async getObjectBuffer(key: string): Promise<{ buffer: Buffer; contentType: string }> {
+    await this.ensureInitialized();
+
+    if (!this.initialized) {
+      throw new Error('MinIO service not initialized');
+    }
+
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      });
+
+      const response = await this.s3Client.send(command);
+
+      const chunks: Buffer[] = [];
+      for await (const chunk of response.Body as AsyncIterable<Buffer>) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const buffer = Buffer.concat(chunks);
+
+      this.logger.debug(`File read into buffer from MinIO: ${key} (${buffer.length} bytes)`);
+
+      return {
+        buffer,
+        contentType: response.ContentType || 'application/octet-stream',
+      };
+    } catch (error) {
+      this.logger.error(`Failed to read file from MinIO: ${key}`, error);
+      throw new Error(`MinIO read failed: ${error.message}`);
     }
   }
 

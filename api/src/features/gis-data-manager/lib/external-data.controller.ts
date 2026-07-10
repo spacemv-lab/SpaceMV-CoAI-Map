@@ -13,6 +13,7 @@ import {
   NotFoundException,
   Logger,
 } from '@nestjs/common';
+import { readFile } from 'fs/promises';
 import { MinioService } from '../services/minio.service';
 import { DatasetService } from './dataset.service';
 import { SyncStatusService } from '../services/sync-status.service';
@@ -207,9 +208,10 @@ export class ExternalDataController {
     }
 
     const result = await this.minioService.downloadAisSnapshot(snapshotId, filePath);
-    // 直接返回文件内容（JSON 字符串）
+    // 直接返回文件内容（JSON 字符串;downloadToTempFile 现流式落盘不返 content,自行读小文件）
+    const content = await readFile(result.filePath, 'utf-8');
     return success({
-      content: result.content,
+      content,
       filePath: result.filePath,
     });
   }

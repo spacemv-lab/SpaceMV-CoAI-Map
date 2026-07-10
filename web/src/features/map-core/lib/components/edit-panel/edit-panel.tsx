@@ -5,12 +5,15 @@
 
 import { useMapStore } from '../../store/use-map-store';
 import { Pencil, X, Trash2, Save, Undo2, Loader2, Check, AlertCircle } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ChangeEvent } from 'react';
 import { toast } from 'sonner';
 import {
   saveFeatureGeometry,
   deleteFeature,
+  uploadDatasetImage,
 } from '@/features/gis-data-manager/feature-api';
+import { AttributeFieldType } from '../../types/map-state';
+import { buildImageUrl } from '../property-value-renderer';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'failed';
 
@@ -165,17 +168,19 @@ export function EditPanel() {
 
   // 优先按字段 schema 渲染（空值也显示，新增字段可见）；schema 为空时退回原始 properties
   const fieldList = layer.fields ?? [];
-  const propRows: Array<{ key: string; label: string; value: unknown }> =
+  const propRows: Array<{ key: string; label: string; value: unknown; type?: AttributeFieldType }> =
     fieldList.length > 0
       ? fieldList.map((field) => ({
           key: field.name,
           label: field.alias || field.name,
           value: properties[field.name],
+          type: field.type,
         }))
       : Object.entries(properties).map(([key, value]) => ({
           key,
           label: key,
           value,
+          type: 'unknown' as AttributeFieldType,
         }));
 
   return (
@@ -220,16 +225,26 @@ export function EditPanel() {
                 <span className="text-gray-500 font-medium w-24 shrink-0 truncate" title={row.key}>
                   {row.label}
                 </span>
-                <input
-                  type="text"
-                  defaultValue={typeof row.value === 'object' ? JSON.stringify(row.value) : String(row.value ?? '-')}
-                  onBlur={(e) => handlePropertyChange(row.key, e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') e.currentTarget.blur();
-                  }}
-                  disabled={isSaving || isDeleting}
-                  className="flex-1 bg-transparent border border-transparent hover:border-gray-300 focus:border-blue-400 focus:outline-none px-1 py-0.5 rounded disabled:opacity-40"
-                />
+                {row.type === 'image' && layer.sourceId ? (
+                  <ImageFieldEditor
+                    datasetId={layer.sourceId}
+                    value={row.value}
+                    disabled={isSaving || isDeleting}
+                    onUpload={(key) => handlePropertyChange(row.key, key)}
+                    onClear={() => handlePropertyChange(row.key, null)}
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    defaultValue={typeof row.value === 'object' ? JSON.stringify(row.value) : String(row.value ?? '-')}
+                    onBlur={(e) => handlePropertyChange(row.key, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur();
+                    }}
+                    disabled={isSaving || isDeleting}
+                    className="flex-1 bg-transparent border border-transparent hover:border-gray-300 focus:border-blue-400 focus:outline-none px-1 py-0.5 rounded disabled:opacity-40"
+                  />
+                )}
               </div>
             ))}
           </div>
@@ -282,6 +297,79 @@ export function EditPanel() {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** image 类型字段的编辑控件：预览缩略图 + 上传新图 + 清除（值是 MinIO objectKey） */
+function ImageFieldEditor({
+  datasetId,
+  value,
+  disabled,
+  onUpload,
+  onClear,
+}: {
+  datasetId: string;
+  value: unknown;
+  disabled?: boolean;
+  onUpload: (objectKey: string) => void;
+  onClear: () => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const objectKey = typeof value === 'string' && value ? value : null;
+  const busy = disabled || uploading;
+
+  const handleFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setUploading(true);
+    try {
+      const { key } = await uploadDatasetImage(datasetId, file);
+      onUpload(key);
+      toast.success('图片已上传');
+    } catch {
+      toast.error('上传失败');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="flex-1 flex items-center gap-2">
+      {objectKey ? (
+        <>
+          <a href={buildImageUrl(datasetId, objectKey)} target="_blank" rel="noopener noreferrer">
+            <img
+              src={buildImageUrl(datasetId, objectKey)}
+              alt=""
+              className="h-8 w-8 object-cover rounded border"
+            />
+          </a>
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={disabled}
+            className="text-gray-400 hover:text-red-500 disabled:opacity-40"
+            title="清除图片"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </>
+      ) : null}
+      <label
+        className={`inline-flex items-center gap-1 cursor-pointer text-blue-600 hover:underline ${busy ? 'opacity-40 pointer-events-none' : ''}`}
+      >
+        {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+        {objectKey ? '更换' : '上传图片'}
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFile}
+          disabled={busy}
+        />
+      </label>
     </div>
   );
 }

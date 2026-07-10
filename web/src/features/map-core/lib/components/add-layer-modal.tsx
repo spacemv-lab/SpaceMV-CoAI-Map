@@ -5,9 +5,11 @@
 
 import { useState, useEffect } from 'react';
 import { useMapStore } from '../store/use-map-store';
-import { Globe, Ship, Plane, RefreshCw, FolderOpen } from 'lucide-react';
+import { Globe, Ship, Plane, RefreshCw, FolderOpen, Map as MapIcon, Image as ImageIcon } from 'lucide-react';
 import { DatasetRoutingSummary, createLayerFromDataset } from '../runtime/layer-routing';
+import { TIANDITU_PRESETS } from '../constants/tianditu-presets';
 import { httpClient, ApiResponse } from '@txwx-monorepo/api-client';
+import { tileSourceApi, type CogSource } from '@/features/gis-data-manager/lib/api';
 
 interface ExternalSource {
   id: string;
@@ -34,10 +36,15 @@ export function AddLayerModal({ open, onOpenChange, projectId }: AddLayerModalPr
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedExternalIds, setSelectedExternalIds] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'project-data' | 'public-data' | 'realtime-data'>(
+  const [cogSources, setCogSources] = useState<CogSource[]>([]);
+  const [selectedCogIds, setSelectedCogIds] = useState<Set<string>>(new Set());
+  const [activeTab, setActiveTab] = useState<'project-data' | 'public-data' | 'realtime-data' | 'basemap'>(
     projectId ? 'project-data' : 'public-data',
   );
   const addLayer = useMapStore((state) => state.addLayer);
+  const basemap = useMapStore((state) => state.basemap);
+  const setBasemap = useMapStore((state) => state.setBasemap);
+  const tiandituToken = useMapStore((state) => state.tiandituToken);
 
   useEffect(() => {
     if (!open) return;
@@ -90,10 +97,19 @@ export function AddLayerModal({ open, onOpenChange, projectId }: AddLayerModalPr
       }
     };
 
-    void Promise.all([loadData(), loadExternalSources()]);
+    const loadCogSources = async () => {
+      try {
+        setCogSources(await tileSourceApi.listCogSources());
+      } catch {
+        setCogSources([]);
+      }
+    };
+
+    void Promise.all([loadData(), loadExternalSources(), loadCogSources()]);
 
     setSelectedIds(new Set());
     setSelectedExternalIds(new Set());
+    setSelectedCogIds(new Set());
     setActiveTab(projectId ? 'project-data' : 'public-data');
   }, [open, projectId]);
 
@@ -115,6 +131,16 @@ export function AddLayerModal({ open, onOpenChange, projectId }: AddLayerModalPr
       newSelected.add(id);
     }
     setSelectedExternalIds(newSelected);
+  };
+
+  const toggleCogSelection = (id: string) => {
+    const newSelected = new Set(selectedCogIds);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedCogIds(newSelected);
   };
 
   const handleBatchAdd = async () => {
@@ -163,6 +189,25 @@ export function AddLayerModal({ open, onOpenChange, projectId }: AddLayerModalPr
           }
         } catch (error) {
           console.error(`Failed to add external source ${source.name}:`, error);
+        }
+      }
+    }
+
+    // Add cog tile sources（影像瓦片，作为栅格叠加图层）
+    for (const s of cogSources) {
+      if (selectedCogIds.has(s.id)) {
+        const urlTemplate = s.config?.layers?.[0]?.urlTemplate;
+        const bounds = s.config?.bounds;
+        if (urlTemplate) {
+          addLayer({
+            id: `cog-${s.id}`,
+            name: s.name,
+            type: 'Tile',
+            visible: true,
+            opacity: 1,
+            style: { tileUrlTemplate: urlTemplate },
+            routingMetadata: bounds ? { bbox: bounds } : undefined,
+          });
         }
       }
     }
@@ -217,11 +262,78 @@ export function AddLayerModal({ open, onOpenChange, projectId }: AddLayerModalPr
           >
             实时数据
           </button>
+          <button
+            className={`flex-1 p-3 text-sm font-medium transition-colors ${activeTab === 'basemap' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}
+            onClick={() => setActiveTab('basemap')}
+          >
+            <MapIcon className="w-4 h-4 inline mr-1" />
+            底图/瓦片
+          </button>
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-auto p-0">
-          {activeTab === 'project-data' || activeTab === 'public-data' ? (
+          {activeTab === 'basemap' ? (
+            <div className="p-4">
+              <div className="flex items-center gap-2 mb-3 text-sm text-gray-600">
+                <MapIcon className="w-4 h-4" />
+                <span className="font-medium">底图（单选）</span>
+              </div>
+              {!tiandituToken && (
+                <div className="mb-3 p-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded">
+                  未检测到天地图 token，底图瓦片将无法加载。请到「数据广场 → 瓦片」配置。
+                </div>
+              )}
+              <div className="space-y-1">
+                {Object.entries(TIANDITU_PRESETS).map(([key, preset]) => (
+                  <div
+                    key={key}
+                    className={`flex items-center gap-2 p-2 rounded cursor-pointer border transition ${
+                      basemap === key ? 'bg-blue-50 border-blue-300' : 'hover:bg-gray-50 border-transparent'
+                    }`}
+                    onClick={() => {
+                      setBasemap(key);
+                      onOpenChange(false);
+                    }}
+                  >
+                    <span className={`w-3 h-3 rounded-full border-2 ${basemap === key ? 'border-blue-500 bg-blue-500' : 'border-gray-300'}`} />
+                    <span className="text-sm">{preset.label}</span>
+                  </div>
+                ))}
+              </div>
+              {/* 影像瓦片(多选,作为栅格叠加图层) */}
+              <div className="mt-4 pt-3 border-t border-gray-200">
+                <div className="flex items-center gap-2 mb-2 text-sm text-gray-600">
+                  <ImageIcon className="w-4 h-4" />
+                  <span className="font-medium">影像瓦片（多选，叠加图层）</span>
+                </div>
+                {cogSources.filter((s) => s.ingestStatus === 'READY').length === 0 ? (
+                  <p className="text-xs text-gray-400 ml-6">
+                    暂无就绪影像。到「数据广场 → 瓦片」上传 GeoTIFF。
+                  </p>
+                ) : (
+                  <div className="space-y-1 ml-6">
+                    {cogSources
+                      .filter((s) => s.ingestStatus === 'READY')
+                      .map((s) => (
+                        <label
+                          key={s.id}
+                          className="flex items-center gap-2 p-1.5 rounded hover:bg-gray-50 cursor-pointer text-sm"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedCogIds.has(s.id)}
+                            onChange={() => toggleCogSelection(s.id)}
+                            className="rounded border-gray-300 text-blue-600 w-4 h-4"
+                          />
+                          <span>{s.name}</span>
+                        </label>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : activeTab === 'project-data' || activeTab === 'public-data' ? (
             loading ? (
               <div className="flex items-center justify-center h-32 text-gray-400">
                 <RefreshCw className="w-5 h-5 animate-spin mr-2" />
@@ -359,9 +471,9 @@ export function AddLayerModal({ open, onOpenChange, projectId }: AddLayerModalPr
           <button
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
             onClick={handleBatchAdd}
-            disabled={selectedIds.size + selectedExternalIds.size === 0}
+            disabled={selectedIds.size + selectedExternalIds.size + selectedCogIds.size === 0}
           >
-            添加选中 ({selectedIds.size + selectedExternalIds.size})
+            添加选中 ({selectedIds.size + selectedExternalIds.size + selectedCogIds.size})
           </button>
         </div>
       </div>

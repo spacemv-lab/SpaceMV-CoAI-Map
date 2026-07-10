@@ -1705,6 +1705,99 @@ function syncDrawLayers(
   }
 }
 
+/**
+ * 添加栅格瓦片图层(COG/XYZ):raster source + raster layer。
+ * urlTemplate 取自 layer.style.tileUrlTemplate(来自 TileSource.config.urlTemplate)。
+ */
+function addRasterLayer(map: maplibregl.Map, layer: LayerState) {
+  const url = layer.style?.tileUrlTemplate as string | undefined;
+  if (!url) return;
+  const rasterLayerId = `${layer.id}-raster`;
+
+  if (!map.getSource(layer.id)) {
+    map.addSource(layer.id, {
+      type: 'raster',
+      tiles: [url],
+      tileSize: 256,
+    });
+  }
+  if (!map.getLayer(rasterLayerId)) {
+    map.addLayer({
+      id: rasterLayerId,
+      type: 'raster',
+      source: layer.id,
+      layout: { visibility: layer.visible ? 'visible' : 'none' },
+      paint: { 'raster-opacity': layer.opacity ?? 1 },
+    });
+  }
+}
+
+/** 移除栅格瓦片图层 */
+function removeRasterLayer(map: maplibregl.Map, layerId: string) {
+  const rasterLayerId = `${layerId}-raster`;
+  if (map.getLayer(rasterLayerId)) map.removeLayer(rasterLayerId);
+  if (map.getSource(layerId)) map.removeSource(layerId);
+}
+
+/**
+ * 同步栅格瓦片图层(type='Tile' 且带 style.tileUrlTemplate)。
+ * 增删 + 可见性/透明度更新。
+ */
+function syncRasterLayers(
+  map: maplibregl.Map,
+  layers: LayerState[],
+  addedRaster: Set<string>,
+) {
+  if (!isMapValid(map)) return;
+
+  const validIds = new Set(
+    layers
+      .filter(
+        (l) =>
+          l.type === 'Tile' &&
+          (l.style?.tileUrlTemplate as string | undefined),
+      )
+      .map((l) => l.id),
+  );
+
+  // 1. 移除孤立栅格图层
+  for (const id of addedRaster) {
+    if (!validIds.has(id)) {
+      removeRasterLayer(map, id);
+      addedRaster.delete(id);
+    }
+  }
+
+  // 2. setStyle()（底图切换）后 source 可能被清空
+  for (const id of addedRaster) {
+    if (!map.getSource(id)) {
+      addedRaster.delete(id);
+    }
+  }
+
+  // 3. 添加或更新
+  for (const layer of layers) {
+    if (layer.type !== 'Tile') continue;
+    const url = layer.style?.tileUrlTemplate as string | undefined;
+    if (!url) continue;
+
+    if (!addedRaster.has(layer.id)) {
+      addRasterLayer(map, layer);
+      addedRaster.add(layer.id);
+    } else {
+      const rasterLayerId = `${layer.id}-raster`;
+      if (map.getLayer(rasterLayerId)) {
+        map.setLayoutProperty(
+          rasterLayerId,
+          'visibility',
+          layer.visible ? 'visible' : 'none',
+        );
+        map.setPaintProperty(rasterLayerId, 'raster-opacity', layer.opacity ?? 1);
+      }
+    }
+  }
+}
+
 // ============================================
 // Component
 // ============================================
@@ -1727,6 +1820,7 @@ export function MapLibreLayerRenderer() {
   // 跟踪已添加的图层 ID
   const addedLayersRef = useRef<Set<string>>(new Set());
   const addedDrawLayersRef = useRef<Set<string>>(new Set()); // Draw 图层跟踪
+  const addedRasterLayersRef = useRef<Set<string>>(new Set()); // 栅格瓦片(Tile/COG)图层跟踪
   const isDraggingRef = useRef(false);
   const dragStartRef = useRef<[number, number] | null>(null);
   const dragStartScreenRef = useRef<[number, number] | null>(null); // 起始屏幕坐标
@@ -1749,6 +1843,7 @@ export function MapLibreLayerRenderer() {
     }
 
     syncMvtLayers(map, layers, addedLayersRef.current);
+    syncRasterLayers(map, layers, addedRasterLayersRef.current);
     syncDrawLayers(map, layers, addedDrawLayersRef.current);
   }, [layers, viewerReady]);
 
@@ -1777,6 +1872,7 @@ export function MapLibreLayerRenderer() {
 
       // 清空追踪 Set
       addedLayersRef.current.clear();
+      addedRasterLayersRef.current.clear();
       addedDrawLayersRef.current.clear();
 
       // 重新同步图层
@@ -1785,11 +1881,13 @@ export function MapLibreLayerRenderer() {
       // 如果 style 已经 loaded，立即同步；否则等待 styledata 事件
       if (map.isStyleLoaded?.()) {
         syncMvtLayers(map, layers, addedLayersRef.current);
+        syncRasterLayers(map, layers, addedRasterLayersRef.current);
         syncDrawLayers(map, layers, addedDrawLayersRef.current);
       } else {
         // 使用 styledata 事件（MapLibre 正确的事件名，不是 style.load）
         map.once('styledata', () => {
           syncMvtLayers(map, layers, addedLayersRef.current);
+          syncRasterLayers(map, layers, addedRasterLayersRef.current);
           syncDrawLayers(map, layers, addedDrawLayersRef.current);
         });
       }

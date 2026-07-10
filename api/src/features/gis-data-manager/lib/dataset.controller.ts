@@ -236,6 +236,13 @@ export class DatasetController {
     @Body('targetCRS') targetCRS?: string,
     @Body('mappingProfileId') mappingProfileId?: string,
     @Body('encoding') encoding?: string,
+    // 表格列指认（csv/xls/xlsx）：表头行 / 工作表 / 经纬度列 / wkt 列
+    @Body('headerRow') headerRow?: string,
+    @Body('sheet') sheet?: string,
+    @Body('latitudeColumn') latitudeColumn?: string,
+    @Body('longitudeColumn') longitudeColumn?: string,
+    @Body('geometryColumn') geometryColumn?: string,
+    @Body('wktColumn') wktColumn?: string,
   ) {
     this.logger.log(`[UPLOAD] encoding parameter received: ${encoding || 'none'}`);
     this.logger.log(`[UPLOAD] scope parameter received: ${scope || 'none'}`);
@@ -371,6 +378,13 @@ export class DatasetController {
           validateGeometry: true,
           repairGeometry: true,
           encoding,
+          // 表格列指认透传到 TableAdapter.parse
+          headerRow: headerRow ? Number(headerRow) : undefined,
+          sheet,
+          latitudeColumn,
+          longitudeColumn,
+          geometryColumn,
+          wktColumn,
         },
       );
 
@@ -530,6 +544,63 @@ export class DatasetController {
       body.properties,
     );
     return success(result);
+  }
+
+  // ============================================
+  // Dataset Images（要素属性图片：存 MinIO objectKey，下载走代理）
+  // ============================================
+
+  /** 上传要素属性图片 → 存 MinIO → 返回 objectKey 与下载代理 URL */
+  @Post(':id/images')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+    }),
+  )
+  async uploadDatasetImage(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('File is required');
+    }
+    if (!this.minioService.isInitialized()) {
+      throw new InternalServerErrorException('存储服务未初始化');
+    }
+
+    // 文件名 latin1→utf8 修复（同 uploadFile，multer 默认 Latin1 会把中文打乱）
+    let originalName = file.originalname;
+    try {
+      originalName = Buffer.from(originalName, 'latin1').toString('utf8');
+    } catch (e) {
+      this.logger.warn(`Failed to fix filename encoding: ${e.message}`);
+    }
+
+    const key = this.minioService.generateStorageKey(originalName, id);
+    await this.minioService.uploadFile(key, file.buffer, file.mimetype);
+    this.logger.log(`Dataset image uploaded: dataset=${id} key=${key}`);
+
+    return success({
+      key,
+      // 下载走代理 endpoint（@SkipAuth，分享页匿名 <img> 可加载）
+      url: `/api/datasets/${id}/images?key=${encodeURIComponent(key)}`,
+    });
+  }
+
+  /** 下载要素属性图片（代理 MinIO → 客户端；@SkipAuth 供分享页匿名 <img>） */
+  @Get(':id/images')
+  @SkipAuth()
+  async getDatasetImage(
+    @Param('id') id: string,
+    @Query('key') key: string,
+  ): Promise<StreamableFile> {
+    if (!key || !this.minioService.isMinioKey(key)) {
+      throw new BadRequestException('Invalid key');
+    }
+    const { buffer, contentType } = await this.minioService.getObjectBuffer(key);
+    this.logger.debug(`Serving dataset image: dataset=${id} key=${key} (${buffer.length} bytes)`);
+    return new StreamableFile(buffer, { type: contentType });
   }
 
   // ============================================

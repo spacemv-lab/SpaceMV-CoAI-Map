@@ -9,7 +9,7 @@
 import type { Feature as GeoJSONFeature } from 'geojson';
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { httpClient, getRefreshToken } from '@txwx-monorepo/api-client';
+import { httpClient, getRefreshToken, ApiResponse } from '@txwx-monorepo/api-client';
 import {
   AttributeFieldType,
   AttributePanelTab,
@@ -114,6 +114,8 @@ interface MapStoreActions {
   }) => void;
   setInteractionMode: (mode: InteractionMode) => void;
   setViewerReady: (ready: boolean) => void;
+  /** 拉取天地图 token(/tile-sources/tianditu-token,平台兜底);幂等,成功/失败均置 ready */
+  loadTiandituToken: () => Promise<void>;
   setPanelResizing: (isResizing: boolean) => void;
   setLegendVisible: (visible: boolean) => void;
   setExperimental: (config: Partial<ExperimentalConfig>) => void;
@@ -254,6 +256,8 @@ const initialState: MapStateSchema = {
     datasetId: null,
   },
   viewerReady: false,
+  tiandituToken: '',
+  tiandituTokenReady: false,
   legendVisible: false,
   isPanelResizing: false,
   readOnly: false,
@@ -321,6 +325,43 @@ function placeBoxCentered(
 export const useMapStore = create<MapStoreState>()(
   immer((set, get) => ({
     ...initialState,
+
+    loadTiandituToken: async () => {
+      if (get().tiandituTokenReady) return; // 幂等:已加载则不重复
+      // 1) 鉴权态优先:用户自配 token
+      try {
+        const res = await httpClient.get<
+          ApiResponse<{ token: string | null }>
+        >('/tile-sources/tianditu/credential');
+        const userToken = res.data.data?.token;
+        if (userToken) {
+          set((s) => {
+            s.tiandituToken = userToken;
+            s.tiandituTokenReady = true;
+          });
+          return;
+        }
+        // 用户未配 token → 落到平台兜底
+      } catch {
+        // 401（匿名/分享页）或网络错误 → 落到平台兜底
+      }
+      // 2) 平台兜底（公开端点）
+      try {
+        const res = await httpClient.get<
+          ApiResponse<{ token: string; source: string }>
+        >('/tile-sources/tianditu-token');
+        set((s) => {
+          s.tiandituToken = res.data.data?.token ?? '';
+          s.tiandituTokenReady = true;
+        });
+      } catch (e) {
+        console.error('[loadTiandituToken] 拉取天地图 token 失败', e);
+        set((s) => {
+          s.tiandituToken = '';
+          s.tiandituTokenReady = true; // 失败也标记 ready,地图照渲染(底图瓦片会失败)
+        });
+      }
+    },
 
     addLayer: (layer) =>
       set((state) => {

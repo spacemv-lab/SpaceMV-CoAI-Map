@@ -7,6 +7,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useMapStore } from '../../store/use-map-store';
 import { drawTitle, drawNorthArrow, drawScaleBar, drawLegend, drawTianditu, drawBrand, loadNorthArrowSvg, loadTiandituLogo } from '../../utils/map-elements';
+import { isDarkBasemap } from '../../constants/tianditu-presets';
 import { NorthArrowStyle } from '../../types/export-state';
 
 // Preload all north arrow SVG styles
@@ -40,6 +41,7 @@ export function ExportPreviewCanvas() {
   const selectionBox = useMapStore((state) => state.exportPanel.selectionBox);
   const config = useMapStore((state) => state.exportPanel.config);
   const viewport = useMapStore((state) => state.viewport);
+  const basemap = useMapStore((state) => state.basemap);
   const layers = useMapStore(
     useShallow((state) => state.layers.filter(l => l.visible))
   );
@@ -92,11 +94,11 @@ export function ExportPreviewCanvas() {
     drawLegend(ctx, config.legend, width, height, layers);
 
     // Draw Tianditu attribution
-    drawTianditu(ctx, config.tianditu, width, height, tiandituLogoCache);
+    drawTianditu(ctx, config.tianditu, width, height, tiandituLogoCache, isDarkBasemap(basemap));
     drawBrand(ctx, config.brand, width, height);
 
     ctx.restore();
-  }, [config, viewport, layers]);
+  }, [config, viewport, basemap, layers]);
 
   // Redraw on config/viewport change
   useEffect(() => {

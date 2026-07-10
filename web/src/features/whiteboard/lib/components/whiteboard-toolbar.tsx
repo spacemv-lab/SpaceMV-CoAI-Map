@@ -11,7 +11,7 @@ import { toast } from 'sonner';
 import { useWhiteboardStore, type WhiteboardSaveState } from '../store/use-whiteboard-store';
 import { exportCurrentPagePng } from '../utils/export-page-png';
 import { exportAllPagesPdf } from '../utils/export-pages-pdf';
-import { TemplatePicker } from './template-picker';
+import { TemplateGallery } from './template-gallery';
 import { PreviewPanel } from './preview-panel';
 
 function SaveStateBadge({ state }: { state: WhiteboardSaveState }) {
@@ -70,7 +70,7 @@ export function WhiteboardToolbar({ projectId }: { projectId: string }) {
   return (
     <>
       <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[500] flex items-center gap-1 bg-white/90 backdrop-blur rounded-lg shadow-lg border px-2 py-1 pointer-events-auto">
-        <TemplatePicker />
+        <TemplateGallery />
 
         <div className="w-px h-5 bg-gray-200 mx-1" />
 

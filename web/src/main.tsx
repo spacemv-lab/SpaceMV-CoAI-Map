@@ -8,6 +8,7 @@ import * as ReactDOM from 'react-dom/client';
 import { Toaster } from 'sonner';
 import { setPageTitle } from './constants/brand';
 import { useAuthStore } from './store/useAuthStore';
+import { useMapStore } from './features/map-core/lib/store/use-map-store';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import './styles.css';
 import AppRouter from './routes/index';
@@ -22,6 +23,9 @@ if (import.meta.env.DEV) {
 
 // 初始化认证状态检查
 useAuthStore.getState().checkAuthStatus();
+
+// 拉取天地图 token（平台兜底，公开接口；地图渲染器据此 gate 初始化）
+useMapStore.getState().loadTiandituToken();
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement,

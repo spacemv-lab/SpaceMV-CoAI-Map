@@ -7,12 +7,13 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/commo
 import { Worker, Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { GisJobData, GisJobResult } from './gis.queue';
+import { IndexProcessor } from './index.processor';
 import { GeoJsonAdapter } from '../adapters/geojson.adapter';
 import { ShapefileAdapter } from '../adapters/shapefile.adapter';
 import { KmlAdapter } from '../adapters/kml.adapter';
 import { TableAdapter } from '../adapters/table.adapter';
 import { DatasetService } from '../lib/dataset.service';
-import { IngestStatus } from '@prisma/client';
+import { IngestStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { buildRedisOptions } from '../utils/redis.config';
 import { geoJsonGeometryToWkt } from '../utils/geometry-wkt';
@@ -72,6 +73,7 @@ export class GisProcessor implements OnModuleInit, OnModuleDestroy {
     private shapefileAdapter: ShapefileAdapter,
     private kmlAdapter: KmlAdapter,
     private tableAdapter: TableAdapter,
+    private indexProcessor: IndexProcessor,
   ) {}
 
   async onModuleInit() {
@@ -139,15 +141,21 @@ export class GisProcessor implements OnModuleInit, OnModuleDestroy {
         throw new Error(`Unsupported file type: ${fileType}`);
       }
 
-      // Parse the file
-      // Pass encoding option for shapefiles
-      // fileType includes the dot (e.g. '.zip'), need to check without it
-      const isZipFile = fileType.toLowerCase().replace('.', '') === 'zip';
-      const parseOptions = isZipFile && options?.encoding
-        ? { encoding: options.encoding }
-        : undefined;
+      // 透传解析选项：shapefile(zip)收 encoding；表格(csv/xls/xlsx)收列指认/headerRow/sheet。
+      // 各 adapter 按自己关心的字段取用（BaseAdapter 泛型 TOptions）。
+      const parseOptions: Record<string, unknown> = {};
+      if (options?.encoding) parseOptions.encoding = options.encoding;
+      if (options?.headerRow !== undefined) parseOptions.headerRow = options.headerRow;
+      if (options?.sheet !== undefined) parseOptions.sheet = options.sheet;
+      if (options?.latitudeColumn) parseOptions.latitudeColumn = options.latitudeColumn;
+      if (options?.longitudeColumn) parseOptions.longitudeColumn = options.longitudeColumn;
+      if (options?.geometryColumn) parseOptions.geometryColumn = options.geometryColumn;
+      if (options?.wktColumn) parseOptions.wktColumn = options.wktColumn;
 
-      const parseResult = await adapter.parse(filePath, parseOptions);
+      const parseResult = await adapter.parse(
+        filePath,
+        Object.keys(parseOptions).length > 0 ? parseOptions : undefined,
+      );
 
       // Update status to VALIDATING
       await this.updateStatus(versionId, 'VALIDATING', {
@@ -168,6 +176,9 @@ export class GisProcessor implements OnModuleInit, OnModuleDestroy {
 
       // Store features in database
       await this.storeFeatures(versionId, validFeatures);
+
+      // Build spatial indexes（partial GIST/GIN for this version）—— 非阻塞，失败仅记日志
+      await this.indexProcessor.buildIndex(versionId);
 
       // Update dataset version with results
       await this.datasetService.datasetVersion.update({
@@ -305,29 +316,29 @@ export class GisProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   private async storeFeatures(versionId: string, features: any[]): Promise<void> {
-    // Batch insert in chunks
-    const chunkSize = 100;
+    if (features.length === 0) return;
 
-    for (let i = 0; i < features.length; i += chunkSize) {
-      const chunk = features.slice(i, i + chunkSize);
+    // 批量插入（UNNEST 把 JS 数组展开成行，一条 SQL 插入整批，避免逐条往返）。
+    const batchSize = 500;
+    for (let i = 0; i < features.length; i += batchSize) {
+      const batch = features.slice(i, i + batchSize);
+      const ids = batch.map(() => randomUUID());
+      const wkts = batch.map((f) => geoJsonGeometryToWkt(f.geometry));
+      // properties 序列化成 JSON 字符串，UNNEST 时 ::jsonb[] 转回
+      //（PostgreSQL TEXT/JSONB 不能含 null byte，先 removeNullBytes）
+      const props = batch.map((f) =>
+        JSON.stringify(this.removeNullBytes(f.properties)),
+      );
 
-      for (const feature of chunk) {
-        const featureId = randomUUID();
-        const geometryWkt = geoJsonGeometryToWkt(feature.geometry);
-
-        // Remove null bytes from properties - PostgreSQL TEXT/JSONB cannot handle \u0000
-        const cleanedProperties = this.removeNullBytes(feature.properties);
-
-        await this.datasetService.$executeRaw`
-          INSERT INTO "GisFeature" ("id", "versionId", "properties", "geometry")
-          VALUES (
-            ${featureId},
-            ${versionId},
-            ${cleanedProperties}::jsonb,
-            ST_SetSRID(ST_GeomFromText(${geometryWkt}), 4326)
-          )
-        `;
-      }
+      await this.datasetService.$executeRaw`
+        INSERT INTO "GisFeature" ("id", "versionId", "properties", "geometry")
+        SELECT id, ${versionId}, props, ST_SetSRID(ST_GeomFromText(wkt), 4326)
+        FROM UNNEST(
+          ARRAY[${Prisma.join(ids)}]::text[],
+          ARRAY[${Prisma.join(wkts)}]::text[],
+          ARRAY[${Prisma.join(props)}]::jsonb[]
+        ) AS t(id, wkt, props)
+      `;
     }
   }
 

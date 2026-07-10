@@ -19,6 +19,12 @@ export interface GisJobData {
     validateGeometry?: boolean;
     repairGeometry?: boolean;
     encoding?: string;
+    headerRow?: number;
+    sheet?: string;
+    latitudeColumn?: string;
+    longitudeColumn?: string;
+    geometryColumn?: string;
+    wktColumn?: string;
   };
 }
 

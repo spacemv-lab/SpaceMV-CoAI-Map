@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMapStore } from '../store/use-map-store';
 import tiandtMapLogo from '../images/天地图.png';
 import { BASEMAP_BRAND } from '../constants/brand';
+import { isDarkBasemap } from '../constants/tianditu-presets';
 
 /**
  * 计算比例尺（考虑纬度和屏幕 DPI）
@@ -22,6 +23,8 @@ function computeScale(maplibreZoom: number, lat: number): number {
 
 export function BottomBar() {
   const viewport = useMapStore((state) => state.viewport);
+  const basemap = useMapStore((state) => state.basemap);
+  const dark = isDarkBasemap(basemap);
   const [mouseCoords, setMouseCoords] = useState<{
     lat: number;
     lon: number;
@@ -58,7 +61,12 @@ export function BottomBar() {
           alt={BASEMAP_BRAND.tianditu.name}
           className="h-5 w-auto"
         />
-        {/* 审图号文字已移除，只保留 logo: {BASEMAP_BRAND.tianditu.license} */}
+        <span
+          className="text-[11px] leading-none whitespace-nowrap"
+          style={{ color: dark ? '#ffffff' : '#1e293b' }}
+        >
+          {BASEMAP_BRAND.tianditu.license}
+        </span>
       </div>
 
       <div className="bg-white/90 backdrop-blur rounded-lg shadow-lg border px-3 py-1 text-xs text-gray-600 flex items-center gap-4">

@@ -12,6 +12,8 @@ import { NotificationList, Notification } from './components/notification-list';
 import { IngestStatusTracker } from './components/ingest-status-tracker';
 import { ValidationReportView } from './components/validation-report-view';
 import { ExternalDataSection } from './components/external-data-section';
+import { BasemapSection } from './components/basemap-section';
+import { ImagerySection } from './components/imagery-section';
 import { Dataset, StorageStats, IngestStatusInfo, ValidationReport, DatasetScope } from './types';
 import { useDatasetList } from './hooks/use-dataset-list';
 import { Upload, RefreshCw, Info, FileText } from 'lucide-react';
@@ -197,7 +199,7 @@ export function GisDataManager({
   return (
     <div className={`flex h-full w-full bg-background gap-6 ${isInProject ? 'pl-[72px] pr-6 py-6' : 'p-6'}`}>
       {/* 左侧：主要内容区域 */}
-      <div className="flex-1 flex flex-col gap-6">
+      <div className="flex-1 flex flex-col gap-6 overflow-y-auto min-h-0 custom-scrollbar">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">{effectiveTitle}</h1>
@@ -220,12 +222,19 @@ export function GisDataManager({
           </div>
         </div>
 
-        {/* External Data Sources - Only in GLOBAL scope */}
+        {/* 底图配置 */}
+        {effectiveScope === 'GLOBAL' && <BasemapSection />}
+
+        {/* 实时数据 */}
         {effectiveScope === 'GLOBAL' && (
           <ExternalDataSection onAddLayer={handleAddExternalSource} />
         )}
 
-        {/* Dataset Table - Filter out external data sources (AIS/ADS-B) */}
+        {/* 矢量数据 */}
+        <div>
+          <h2 className="text-lg font-semibold mb-1 text-gray-700">矢量数据</h2>
+          <p className="text-xs text-gray-400 mb-3">Shapefile / GeoJSON / KML / CSV 上传与管理</p>
+        </div>
         <DatasetTable
           data={datasets.filter(d => !d.externalId)}
           loading={loading}
@@ -233,6 +242,9 @@ export function GisDataManager({
           onDelete={handleDelete}
           onViewReport={handleViewReport}
         />
+
+        {/* 影像数据 */}
+        {effectiveScope === 'GLOBAL' && <ImagerySection />}
       </div>
 
       {/* 右侧：侧边栏 */}

@@ -36,6 +36,7 @@ import {
   Check,
   Edit2,
   Save,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { recordInteractionMetric } from '../monitoring/performance-monitor';
 
@@ -556,6 +557,9 @@ export function LayerManager({ readOnly = false }: { readOnly?: boolean } = {}) 
                         }
                   }
                 >
+                  {layer.type === 'Tile' && (
+                    <ImageIcon className="w-3 h-3 inline mr-1 text-blue-400" />
+                  )}
                   {layer.name}
                 </span>
               )}
@@ -592,22 +596,24 @@ export function LayerManager({ readOnly = false }: { readOnly?: boolean } = {}) 
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="z-[60]" onCloseAutoFocus={(e) => e.preventDefault()}>
-                <DropdownMenuItem
-                  onSelect={() => {
-                    if (activeLayerId === layer.id) {
-                      const hasChanges = useMapStore.getState().edit.hasUnsavedChanges;
-                      if (hasChanges && !confirm('有未保存的修改，是否放弃？')) return;
-                      setActiveLayer(null);
-                      clearEditState();
-                    } else {
-                      setActiveLayer(layer.id);
-                    }
-                    setOpenDropdownId(null);
-                  }}
-                >
-                  <Edit3 className="w-3 h-3 mr-2" />
-                  {activeLayerId === layer.id ? '停止编辑' : '开启编辑'}
-                </DropdownMenuItem>
+                {layer.type !== 'Tile' && (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      if (activeLayerId === layer.id) {
+                        const hasChanges = useMapStore.getState().edit.hasUnsavedChanges;
+                        if (hasChanges && !confirm('有未保存的修改，是否放弃？')) return;
+                        setActiveLayer(null);
+                        clearEditState();
+                      } else {
+                        setActiveLayer(layer.id);
+                      }
+                      setOpenDropdownId(null);
+                    }}
+                  >
+                    <Edit3 className="w-3 h-3 mr-2" />
+                    {activeLayerId === layer.id ? '停止编辑' : '开启编辑'}
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   onSelect={() => {
                     handleZoomToLayer(layer.id);
@@ -617,49 +623,53 @@ export function LayerManager({ readOnly = false }: { readOnly?: boolean } = {}) 
                   <Search className="w-3 h-3 mr-2" />
                   缩放至图层
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => {
-                    openAttributePanel(layer.id);
-                    recordInteractionMetric('interaction.attribute-panel', {
-                      layerId: layer.id,
-                    });
-                    setOpenDropdownId(null);
-                  }}
-                >
-                  <FileText className="w-3 h-3 mr-2" />
-                  属性表
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className={layer.style?.label?.enabled ? 'bg-green-50 text-green-700 focus:bg-green-100 focus:text-green-800' : ''}
-                  onSelect={() => {
-                    openLabelPanel(layer.id);
-                    recordInteractionMetric('interaction.label-panel', {
-                      layerId: layer.id,
-                    });
-                    setOpenDropdownId(null);
-                  }}
-                >
-                  <Tag className="w-3 h-3 mr-2" />
-                  标注
-                  {layer.style?.label?.enabled && (
-                    <span className="ml-auto text-xs flex items-center gap-1">
-                      <Check className="w-3 h-3" />
-                      已启用
-                    </span>
-                  )}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => {
-                    openStylePanel(layer.id);
-                    recordInteractionMetric('interaction.style-panel', {
-                      layerId: layer.id,
-                    });
-                    setOpenDropdownId(null);
-                  }}
-                >
-                  <Settings className="w-3 h-3 mr-2" />
-                  样式设置
-                </DropdownMenuItem>
+                {layer.type !== 'Tile' && (
+                  <>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        openAttributePanel(layer.id);
+                        recordInteractionMetric('interaction.attribute-panel', {
+                          layerId: layer.id,
+                        });
+                        setOpenDropdownId(null);
+                      }}
+                    >
+                      <FileText className="w-3 h-3 mr-2" />
+                      属性表
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className={layer.style?.label?.enabled ? 'bg-green-50 text-green-700 focus:bg-green-100 focus:text-green-800' : ''}
+                      onSelect={() => {
+                        openLabelPanel(layer.id);
+                        recordInteractionMetric('interaction.label-panel', {
+                          layerId: layer.id,
+                        });
+                        setOpenDropdownId(null);
+                      }}
+                    >
+                      <Tag className="w-3 h-3 mr-2" />
+                      标注
+                      {layer.style?.label?.enabled && (
+                        <span className="ml-auto text-xs flex items-center gap-1">
+                          <Check className="w-3 h-3" />
+                          已启用
+                        </span>
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        openStylePanel(layer.id);
+                        recordInteractionMetric('interaction.style-panel', {
+                          layerId: layer.id,
+                        });
+                        setOpenDropdownId(null);
+                      }}
+                    >
+                      <Settings className="w-3 h-3 mr-2" />
+                      样式设置
+                    </DropdownMenuItem>
+                  </>
+                )}
                 {/* 改名菜单项 */}
                 <DropdownMenuItem
                   onSelect={() => {

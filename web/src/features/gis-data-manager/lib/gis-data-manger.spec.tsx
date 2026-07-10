@@ -36,6 +36,11 @@ vi.mock('./api', () => ({
     delete: vi.fn(),
     getExternalVersions: vi.fn(),
   },
+  tileSourceApi: {
+    getCredential: vi.fn().mockResolvedValue({ token: null }),
+    setCredential: vi.fn().mockResolvedValue(undefined),
+    clearCredential: vi.fn().mockResolvedValue(undefined),
+  },
 }));
 
 vi.mock('./components/external-data-section', () => ({

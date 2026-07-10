@@ -4,9 +4,10 @@
  */
 
 import { MapElementConfig, NorthArrowConfig, NorthArrowStyle, LegendConfig, TiandituConfig, BrandConfig } from '../types/export-state';
-import { PROJECT_BRAND } from '../constants/brand';
-// 审图号文字已移除（只保留 logo 图片），如需恢复取消下一行注释
-// import { BASEMAP_BRAND } from '../constants/brand';
+import { PROJECT_BRAND, BASEMAP_BRAND } from '../constants/brand';
+import { createSymbolCanvas } from './symbol-canvas';
+import { computeGraduatedLegendItems, type GraduatedLegendItem } from './graduated-legend';
+import type { GraduatedConfig } from '../types/graduated-style';
 
 // Import SVG files as raw strings (Vite feature)
 import northArrowSvg1 from '../assets/north-arrow-1.svg?raw';
@@ -324,116 +325,184 @@ export function drawLegend(
   config: LegendConfig,
   canvasWidth: number,
   canvasHeight: number,
-  layers: Array<{ name: string; geometryType?: string; style?: { color?: string } }>
+  layers: Array<{
+    name: string;
+    geometryType?: string;
+    style?: {
+      color?: string;
+      opacity?: number;
+      pointSymbol?: string;
+      pointImageUri?: string;
+      renderingType?: string;
+      graduatedConfig?: GraduatedConfig;
+    };
+  }>,
 ): void {
   if (!config.enabled || layers.length === 0) return;
 
   ctx.save();
 
   const DEFAULT_COLOR = '#cccccc';
-  const itemHeight = 20;
+  const itemHeight = 18;
   const padding = 8;
   const iconSize = 12;
   const minWidth = 100;
   const maxWidth = 300;
   const titleHeight = 16; // Height for "图例" title
+  const maxLegendHeight = 260;
 
-  // Calculate width based on longest layer name
   ctx.font = '11px sans-serif';
-  const maxNameWidth = layers.reduce((max, layer) => {
-    const w = ctx.measureText(layer.name).width;
+
+  // 预解析每层：分级展开成多个类别条目，单色保持一条（与浮动图例 legend-panel 规则一致）
+  const resolved = layers.map((layer) => {
+    const style = layer.style;
+    const color = style?.color || DEFAULT_COLOR;
+    const isGraduated = style?.renderingType === 'graduated' && !!style?.graduatedConfig;
+    const items: GraduatedLegendItem[] = isGraduated
+      ? computeGraduatedLegendItems(style!.graduatedConfig!)
+      : [];
+    return { layer, color, isGraduated, items };
+  });
+
+  // 总行数：分级 = 1(层名) + N(类别)；单色 = 1
+  const rowCount = resolved.reduce((n, r) => n + (r.isGraduated ? 1 + r.items.length : 1), 0);
+
+  // 宽度取层名与分级区间 label 的最长者
+  const maxTextWidth = resolved.reduce((max, r) => {
+    let w = ctx.measureText(r.layer.name).width;
+    for (const it of r.items) w = Math.max(w, ctx.measureText(it.label).width);
     return Math.max(max, w);
   }, 0);
 
-  // Legend width = padding + icon + gap + text + padding
-  const legendWidth = Math.min(Math.max(minWidth, padding * 2 + iconSize + 4 + maxNameWidth), maxWidth);
-  const legendHeight = Math.min(layers.length * itemHeight + padding * 2 + titleHeight, 200);
+  const legendWidth = Math.min(Math.max(minWidth, padding * 2 + iconSize + 6 + maxTextWidth), maxWidth);
+  const legendHeight = Math.min(rowCount * itemHeight + padding * 2 + titleHeight, maxLegendHeight);
 
   const position = getElementPosition(config, canvasWidth, canvasHeight, legendWidth, legendHeight);
 
-  // Draw background
+  // 背景 + 边框
   ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
   ctx.fillRect(position.x, position.y, legendWidth, legendHeight);
-
-  // Draw border
   ctx.strokeStyle = '#1e293b';
   ctx.lineWidth = 1;
   ctx.strokeRect(position.x, position.y, legendWidth, legendHeight);
 
-  // Draw title
+  // 标题
   ctx.font = 'bold 12px sans-serif';
   ctx.fillStyle = '#1e293b';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillText('图例', position.x + padding, position.y + padding);
 
-  // Draw layer items
-  ctx.font = '11px sans-serif';
-  const startY = position.y + padding + 16;
+  // 条目
+  const textMaxWidth = legendWidth - padding * 2 - iconSize - 6;
+  const iconX = position.x + padding;
+  const classIconX = position.x + padding + 2;
+  let y = position.y + padding + titleHeight;
+  const bottomLimit = position.y + legendHeight - padding;
 
-  layers.slice(0, Math.floor((legendHeight - padding * 2 - titleHeight) / itemHeight)).forEach((layer, i) => {
-    const y = startY + i * itemHeight;
-    const color = layer.style?.color || DEFAULT_COLOR;
-
-    // Draw geometry icon
-    const iconX = position.x + padding;
-    const iconY = y + 4;
-
-    switch (layer.geometryType) {
-      case 'POINT':
-        // Draw filled circle with border
-        ctx.fillStyle = color;
-        ctx.strokeStyle = '#333333';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(iconX + iconSize / 2, iconY + iconSize / 2, iconSize / 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        break;
-      case 'LINESTRING':
-        // Draw diagonal line (better visual distinction from polygon)
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(iconX + 1, iconY + iconSize - 2);
-        ctx.lineTo(iconX + iconSize - 1, iconY + 2);
-        ctx.stroke();
-        break;
-      case 'POLYGON':
-        // Draw filled square with border
-        ctx.fillStyle = color;
-        ctx.strokeStyle = '#333333';
-        ctx.lineWidth = 1;
-        ctx.fillRect(iconX, iconY, iconSize, iconSize);
-        ctx.strokeRect(iconX, iconY, iconSize, iconSize);
-        break;
-      default:
-        // Draw filled square with border for unknown types
-        ctx.fillStyle = color;
-        ctx.strokeStyle = '#333333';
-        ctx.lineWidth = 1;
-        ctx.fillRect(iconX, iconY, iconSize, iconSize);
-        ctx.strokeRect(iconX, iconY, iconSize, iconSize);
+  const drawLabel = (text: string, x: number, font: string) => {
+    ctx.font = font;
+    let name = text;
+    while (name.length > 0 && ctx.measureText(name).width > textMaxWidth) {
+      name = name.slice(0, -1);
     }
-
-    // Draw layer name (truncate if too long)
-    const maxTextWidth = legendWidth - padding * 2 - iconSize - 4;
-    let displayName = layer.name;
-    const textX = iconX + iconSize + 4;
+    if (name.length === 0) name = text.slice(0, 1);
+    if (name !== text) name = name.slice(0, -1) + '…';
     ctx.fillStyle = '#1e293b';
+    ctx.fillText(name, x, y);
+  };
 
-    // Truncate text if needed
-    while (ctx.measureText(displayName).width > maxTextWidth && displayName.length > 0) {
-      displayName = displayName.slice(0, -1);
-    }
-    if (displayName !== layer.name) {
-      displayName = displayName.slice(0, -2) + '…';
-    }
+  for (const r of resolved) {
+    if (y + itemHeight > bottomLimit) break; // 超高截断
 
-    ctx.fillText(displayName, textX, y + 4);
-  });
+    if (r.isGraduated) {
+      // 分级：层名（加粗，无图标）+ 各类别小色块 + 区间
+      drawLabel(r.layer.name, iconX, 'bold 11px sans-serif');
+      y += itemHeight;
+      for (const it of r.items) {
+        if (y + itemHeight > bottomLimit) break;
+        drawClassIcon(ctx, it.color, r.layer.geometryType, classIconX, y + 3, iconSize);
+        drawLabel(it.label, iconX + iconSize + 6, '11px sans-serif');
+        y += itemHeight;
+      }
+    } else {
+      // 单色：按几何/点形状画图标 + 层名
+      drawSimpleIcon(ctx, r.layer, r.color, iconX, y + 3, iconSize);
+      drawLabel(r.layer.name, iconX + iconSize + 6, '11px sans-serif');
+      y += itemHeight;
+    }
+  }
 
   ctx.restore();
+}
+
+/**
+ * 单色图标：POINT 按 pointSymbol 出形状（复用 createSymbolCanvas，与地图渲染一致）；
+ * LINESTRING 斜线；POLYGON/默认方块。自定义点图未预加载，暂以圆兜底。
+ */
+function drawSimpleIcon(
+  ctx: CanvasRenderingContext2D,
+  layer: { geometryType?: string; style?: { pointSymbol?: string; pointImageUri?: string; opacity?: number } },
+  color: string,
+  x: number,
+  y: number,
+  size: number,
+): void {
+  const opacity = layer.style?.opacity;
+  if (opacity !== undefined) ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
+
+  if (layer.geometryType === 'POINT') {
+    const sym = layer.style?.pointSymbol && layer.style.pointSymbol !== 'custom' ? layer.style.pointSymbol : 'circle';
+    const symCanvas = createSymbolCanvas(sym, color, size * 2);
+    ctx.drawImage(symCanvas, x, y, size, size);
+  } else if (layer.geometryType === 'LINESTRING') {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x + 1, y + size - 2);
+    ctx.lineTo(x + size - 1, y + 2);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = color;
+    ctx.strokeStyle = '#333333';
+    ctx.lineWidth = 1;
+    ctx.fillRect(x, y, size, size);
+    ctx.strokeRect(x, y, size, size);
+  }
+
+  ctx.globalAlpha = 1;
+}
+
+/** 分级类别小标：LINESTRING 斜线、POINT 圆、其他方块 */
+function drawClassIcon(
+  ctx: CanvasRenderingContext2D,
+  color: string,
+  geometryType: string | undefined,
+  x: number,
+  y: number,
+  size: number,
+): void {
+  if (geometryType === 'LINESTRING') {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x + 1, y + size - 2);
+    ctx.lineTo(x + size - 1, y + 2);
+    ctx.stroke();
+    return;
+  }
+  ctx.fillStyle = color;
+  ctx.strokeStyle = '#333333';
+  ctx.lineWidth = 1;
+  if (geometryType === 'POINT') {
+    ctx.beginPath();
+    ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.fillRect(x, y, size, size);
+    ctx.strokeRect(x, y, size, size);
+  }
 }
 
 /**
@@ -444,7 +513,8 @@ export function drawTianditu(
   config: TiandituConfig,
   canvasWidth: number,
   canvasHeight: number,
-  logoImage: HTMLImageElement | null = null
+  logoImage: HTMLImageElement | null = null,
+  dark = false,
 ): void {
   if (!config.enabled) return;
 
@@ -459,33 +529,29 @@ export function drawTianditu(
     : 20;
   const padding = 6;
 
-  // 审图号文字已移除，只保留 logo 图片（如需恢复取消下方注释）
-  // const fontSize = 10;
-  // const gap = 4;
-  // ctx.font = `${fontSize}px sans-serif`;
-  // const licenseText = BASEMAP_BRAND.tianditu.license;
-  // const textWidth = ctx.measureText(licenseText).width;
-  // const elementWidth = logoWidth + gap + textWidth + padding * 2;
+  // 审图号文字宽度（measureText 须在设 font 之后）
+  const fontSize = 10;
+  const gap = 4;
+  ctx.font = `${fontSize}px sans-serif`;
+  const licenseText = BASEMAP_BRAND.tianditu.license;
+  const textWidth = ctx.measureText(licenseText).width;
 
-  const elementWidth = logoWidth + padding * 2;
+  const elementWidth = logoWidth + gap + textWidth + padding * 2;
   const elementHeight = logoHeight + padding * 2;
 
   const position = getElementPosition(config, canvasWidth, canvasHeight, elementWidth, elementHeight);
 
-  // Draw background
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-  ctx.fillRect(position.x, position.y, elementWidth, elementHeight);
-
+  // 不画白底板——logo PNG 自带透明背景；审图号靠明暗自适应配色保证可读（与屏幕左下角一致）。
   // Draw logo
   if (logoImage) {
     ctx.drawImage(logoImage, position.x + padding, position.y + padding, logoWidth, logoHeight);
   }
 
-  // Draw license text (审图号) — 已移除，只保留 logo
-  // ctx.fillStyle = '#1e293b';
-  // ctx.textAlign = 'left';
-  // ctx.textBaseline = 'middle';
-  // ctx.fillText(licenseText, position.x + padding + logoWidth + gap, position.y + elementHeight / 2);
+  // Draw license text (审图号) — 暗底图白字，亮底图黑字
+  ctx.fillStyle = dark ? '#ffffff' : '#1e293b';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(licenseText, position.x + padding + logoWidth + gap, position.y + elementHeight / 2);
 
   ctx.restore();
 }

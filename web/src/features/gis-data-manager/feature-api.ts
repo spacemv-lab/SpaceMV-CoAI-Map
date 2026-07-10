@@ -145,6 +145,30 @@ export async function updateFeatureProperties(
   );
 }
 
+/**
+ * 上传要素属性图片 → 存 MinIO → 返回 objectKey 与下载代理 URL。
+ * properties[imageFieldName] 存 objectKey；渲染时用 url 直接 <img src>。
+ */
+export async function uploadDatasetImage(
+  datasetId: string,
+  file: File,
+): Promise<{ key: string; url: string }> {
+  const form = new FormData();
+  form.append('file', file);
+  const response = await httpClient.post<ApiResponse<{ key: string; url: string }>>(
+    `/datasets/${datasetId}/images`,
+    form,
+    {
+      // httpClient 默认 Content-Type: application/json，浏览器会尊重该显式头、
+      // 不为 FormData 自动改 multipart → multer 不解析、file 没到 → 400。
+      // 显式设 multipart（同 dataset.api.upload / tile-source.api.uploadCog 的做法）。
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000,
+    },
+  );
+  return response.data.data!;
+}
+
 export interface DatasetFieldInput {
   name: string;
   alias?: string;

@@ -14,6 +14,10 @@ import { ProjectShareController } from './project-share.controller';
 import { ProjectShareService } from './project-share.service';
 import { WhiteboardController } from './whiteboard.controller';
 import { WhiteboardService } from './whiteboard.service';
+import { WhiteboardTemplateController } from './whiteboard-template.controller';
+import { WhiteboardTemplateService } from './whiteboard-template.service';
+import { TileSourceController } from './tile-source.controller';
+import { TileSourceService } from './tile-source.service';
 import { DatasetService } from './dataset.service';
 import { GisParseService } from '../services/gis-parse.service';
 import { ValidationService } from '../services/validation.service';
@@ -22,6 +26,8 @@ import { StorageStatsService } from '../services/storage-stats.service';
 import { MinioService } from '../services/minio.service';
 import { GisQueue } from '../queues/gis.queue';
 import { GisProcessor } from '../queues/gis.processor';
+import { CogQueue } from '../queues/cog.queue';
+import { CogProcessor } from '../queues/cog.processor';
 import { IndexProcessor } from '../queues/index.processor';
 import { GeometryValidator } from '../validators/geometry.validator';
 import { CrsValidator } from '../validators/crs.validator';
@@ -63,6 +69,8 @@ import { FieldStatsService } from './field-stats.service';
     PublicShareController,
     ProjectShareController,
     WhiteboardController,
+    WhiteboardTemplateController,
+    TileSourceController,
   ],
   providers: [
     // Core Services
@@ -70,6 +78,8 @@ import { FieldStatsService } from './field-stats.service';
     DatasetService,
     ProjectShareService,
     WhiteboardService,
+    WhiteboardTemplateService,
+    TileSourceService,
     GisParseService,
     ValidationService,
     MappingProfileService,
@@ -80,6 +90,8 @@ import { FieldStatsService } from './field-stats.service';
     GisQueue,
     GisProcessor,
     IndexProcessor,
+    CogQueue,
+    CogProcessor,
 
     // Validators
     GeometryValidator,

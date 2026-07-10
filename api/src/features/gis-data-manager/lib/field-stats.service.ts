@@ -127,6 +127,9 @@ export class FieldStatsService implements OnModuleInit, OnModuleDestroy {
   ): Promise<{ min: number; max: number; mean: number }> {
     // 使用 PostgreSQL 聚合函数
     // properties 是 JSONB 类型，使用 ->> 提取字段值并转换为 numeric
+    // 只对“看起来是数字”的值做聚合：空串/文本/非法值用正则前置过滤，
+    // 避免 (properties ->> field)::numeric 对 '' 或 'abc' 抛 22P02 invalid input syntax。
+    // （空串常见于“清空单元格”后存入的 ""；加字段回填的是 null，已被 IS NOT NULL 滤掉。）
     const result: any[] = await this.datasetService.$queryRaw`
       SELECT
         MIN((properties ->> ${field})::numeric) as min,
@@ -135,7 +138,8 @@ export class FieldStatsService implements OnModuleInit, OnModuleDestroy {
       FROM "GisFeature"
       WHERE "versionId" = ${versionId}
         AND (properties ->> ${field}) IS NOT NULL
-        AND (properties ->> ${field})::numeric IS NOT NULL
+        AND (properties ->> ${field}) <> ''
+        AND (properties ->> ${field}) ~ '^-?[0-9]+(\\.[0-9]+)?$'
     `;
 
     if (!result || result.length === 0 || result[0].min === null) {
@@ -222,7 +226,8 @@ export class FieldStatsService implements OnModuleInit, OnModuleDestroy {
         FROM "GisFeature"
         WHERE "versionId" = '${versionId}'
           AND (properties ->> '${field}') IS NOT NULL
-          AND (properties ->> '${field}')::numeric IS NOT NULL
+          AND (properties ->> '${field}') <> ''
+          AND (properties ->> '${field}') ~ '^-?[0-9]+(\\.[0-9]+)?$'
       `;
 
       const qResult: any[] = await this.datasetService.$queryRawUnsafe(sql);

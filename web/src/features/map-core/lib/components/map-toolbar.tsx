@@ -4,13 +4,11 @@
  */
 
 import { useMapStore } from '../store/use-map-store';
-import { Maximize, Download, Map as MapIcon, Plus, Minus, SwatchBook } from 'lucide-react';
+import { Maximize, Download, Plus, Minus, SwatchBook } from 'lucide-react';
 import { toast } from 'sonner';
 import maplibregl from 'maplibre-gl';
 
 export function MapToolbar() {
-  const basemap = useMapStore((state) => state.basemap);
-  const setBasemap = useMapStore((state) => state.setBasemap);
   const legendVisible = useMapStore((state) => state.legendVisible);
   const setLegendVisible = useMapStore((state) => state.setLegendVisible);
 
@@ -51,20 +49,6 @@ export function MapToolbar() {
     map.zoomOut();
   };
 
-  const cycleBasemap = () => {
-    const basemaps = [
-      'cesium-default',
-      'arcgis-imagery',
-      'tianditu-vec',
-      'tianditu-img',
-      'tianditu-ter',
-      'tianditu-ibo',
-    ];
-    const currentIndex = basemaps.indexOf(basemap);
-    const nextIndex = (currentIndex + 1) % basemaps.length;
-    setBasemap(basemaps[nextIndex]);
-  };
-
   return (
     <div className="flex flex-col gap-2 items-end pointer-events-auto">
       {/* Main Toolbar */}
@@ -83,29 +67,6 @@ export function MapToolbar() {
           title="保存图片"
         >
           <Download className="w-5 h-5" />
-        </button>
-
-        <button
-          onClick={cycleBasemap}
-          className="p-2 rounded hover:bg-gray-100 transition-colors text-gray-600 relative group"
-          title={`切换底图 (${basemap})`}
-        >
-          <MapIcon className="w-5 h-5" />
-          <span className="absolute right-full mr-2 top-1/2 -translate-y-1/2 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-            {basemap === 'cesium-default'
-              ? 'Cesium 默认底图'
-              : basemap === 'arcgis-imagery'
-                ? 'ArcGIS 影像'
-                : basemap === 'tianditu-vec'
-                  ? '天地图矢量'
-                  : basemap === 'tianditu-img'
-                    ? '天地图影像'
-                    : basemap === 'tianditu-ter'
-                      ? '天地图地形'
-                      : basemap === 'tianditu-ibo'
-                        ? '天地图全球境界'
-                        : basemap}
-          </span>
         </button>
 
         <button

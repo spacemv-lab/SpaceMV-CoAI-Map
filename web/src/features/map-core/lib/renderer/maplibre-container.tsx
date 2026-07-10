@@ -18,7 +18,8 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useRef, useState } from 'react';
 import { useMapStore } from '../store/use-map-store';
-import { TIANDITU_TOKEN } from '../constants/map-token';
+import { getTiandituToken } from '../constants/map-token';
+import { TIANDITU_PRESETS } from '../constants/tianditu-presets';
 import { startPerformanceSpan } from '../monitoring/performance-monitor';
 import { MapLibreLayerRenderer } from './maplibre-layer-renderer';
 import { MapLibreDrawRenderer } from './maplibre-draw-renderer';
@@ -42,120 +43,36 @@ function buildTiandituWmtsUrl(layer: string, token: string): string {
 }
 
 /**
- * 天地图底图配置
+ * 由预设 + token 数据驱动构建 MapLibre style（sources + raster layers 按序叠加）。
+ * 预设定义见 constants/tianditu-presets。未知 presetKey 兜底为 'tianditu-vec'。
+ * token 缺失时 URL 无 tk，瓦片会 403（地图 UI 仍渲染）。
  */
-const TIANDITU_STYLES: Record<string, maplibregl.StyleSpecification> = {
-  // 矢量底图 + 注记
-  'tianditu-vec': {
-    version: 8,
-    sources: {
-      'tianditu-vec': {
-        type: 'raster',
-        tiles: [buildTiandituWmtsUrl('vec', TIANDITU_TOKEN)],
-        tileSize: 256,
-        minzoom: 1,
-        maxzoom: 18,
-      },
-      'tianditu-cva': {
-        type: 'raster',
-        tiles: [buildTiandituWmtsUrl('cva', TIANDITU_TOKEN)],
-        tileSize: 256,
-        minzoom: 1,
-        maxzoom: 18,
-      },
-    },
-    layers: [
-      {
-        id: 'tianditu-vec-layer',
-        type: 'raster',
-        source: 'tianditu-vec',
-        minzoom: 1,
-        maxzoom: 18,
-      },
-      {
-        id: 'tianditu-cva-layer',
-        type: 'raster',
-        source: 'tianditu-cva',
-        minzoom: 1,
-        maxzoom: 18,
-      },
-    ],
-  },
-
-  // 影像底图 + 注记
-  'tianditu-img': {
-    version: 8,
-    sources: {
-      'tianditu-img': {
-        type: 'raster',
-        tiles: [buildTiandituWmtsUrl('img', TIANDITU_TOKEN)],
-        tileSize: 256,
-        minzoom: 1,
-        maxzoom: 18,
-      },
-      'tianditu-cia': {
-        type: 'raster',
-        tiles: [buildTiandituWmtsUrl('cia', TIANDITU_TOKEN)],
-        tileSize: 256,
-        minzoom: 1,
-        maxzoom: 18,
-      },
-    },
-    layers: [
-      {
-        id: 'tianditu-img-layer',
-        type: 'raster',
-        source: 'tianditu-img',
-        minzoom: 1,
-        maxzoom: 18,
-      },
-      {
-        id: 'tianditu-cia-layer',
-        type: 'raster',
-        source: 'tianditu-cia',
-        minzoom: 1,
-        maxzoom: 18,
-      },
-    ],
-  },
-
-  // 地形底图 + 注记
-  'tianditu-ter': {
-    version: 8,
-    sources: {
-      'tianditu-ter': {
-        type: 'raster',
-        tiles: [buildTiandituWmtsUrl('ter', TIANDITU_TOKEN)],
-        tileSize: 256,
-        minzoom: 1,
-        maxzoom: 18,
-      },
-      'tianditu-cta': {
-        type: 'raster',
-        tiles: [buildTiandituWmtsUrl('cta', TIANDITU_TOKEN)],
-        tileSize: 256,
-        minzoom: 1,
-        maxzoom: 18,
-      },
-    },
-    layers: [
-      {
-        id: 'tianditu-ter-layer',
-        type: 'raster',
-        source: 'tianditu-ter',
-        minzoom: 1,
-        maxzoom: 18,
-      },
-      {
-        id: 'tianditu-cta-layer',
-        type: 'raster',
-        source: 'tianditu-cta',
-        minzoom: 1,
-        maxzoom: 18,
-      },
-    ],
-  },
-};
+function buildTiandituStyle(
+  presetKey: string,
+  token: string,
+): maplibregl.StyleSpecification {
+  const preset = TIANDITU_PRESETS[presetKey] ?? TIANDITU_PRESETS['tianditu-vec'];
+  const sources: Record<string, maplibregl.SourceSpecification> = {};
+  const layers: maplibregl.LayerSpecification[] = [];
+  for (const code of preset.layers) {
+    const sourceId = `tianditu-${code}`;
+    sources[sourceId] = {
+      type: 'raster',
+      tiles: [buildTiandituWmtsUrl(code, token)],
+      tileSize: 256,
+      minzoom: 1,
+      maxzoom: 18,
+    };
+    layers.push({
+      id: `${sourceId}-layer`,
+      type: 'raster',
+      source: sourceId,
+      minzoom: 1,
+      maxzoom: 18,
+    });
+  }
+  return { version: 8, sources, layers };
+}
 
 /**
  * Cesium zoom (高度米) 转 MapLibre zoom level
@@ -187,6 +104,7 @@ export function MapLibreContainer() {
   const setViewport = useMapStore((state) => state.setViewport);
   const viewport = useMapStore((state) => state.viewport);
   const basemap = useMapStore((state) => state.basemap);
+  const tiandituTokenReady = useMapStore((state) => state.tiandituTokenReady);
   const setViewerReady = useMapStore((state) => state.setViewerReady);
   const selection = useMapStore((state) => state.selection);
   const activeLayerId = useMapStore((state) => state.activeLayerId);
@@ -194,6 +112,8 @@ export function MapLibreContainer() {
   // 初始化 MapLibre Map
   useEffect(() => {
     if (!containerRef.current) return;
+    // 等 token 就绪再建图（否则底图瓦片 URL 无 token 会全 403）
+    if (!tiandituTokenReady) return;
 
     const endMapInitialize = startPerformanceSpan({
       name: 'maplibre.initialize',
@@ -207,7 +127,7 @@ export function MapLibreContainer() {
     // 创建 MapLibre Map
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: TIANDITU_STYLES[basemap] || TIANDITU_STYLES['tianditu-vec'],
+      style: buildTiandituStyle(basemap, getTiandituToken()),
       center: [restoredViewport.center[0], restoredViewport.center[1]],
       zoom: initialZoom,
       bearing: restoredViewport.heading,
@@ -304,21 +224,20 @@ export function MapLibreContainer() {
       map.remove();
       mapRef.current = null;
     };
-  }, [setViewerReady, setViewport]);
+  }, [setViewerReady, setViewport, tiandituTokenReady]);
 
   // 底图切换
   useEffect(() => {
     if (!isReady || !mapRef.current) return;
 
     const map = mapRef.current;
-    const style = TIANDITU_STYLES[basemap];
 
     // 只在 basemap 真正变化时才切换（避免初始化时触发）
     const isBasemapChanged = prevBasemapRef.current !== null && prevBasemapRef.current !== basemap;
     prevBasemapRef.current = basemap;
 
-    if (style && isBasemapChanged) {
-      map.setStyle(style);
+    if (isBasemapChanged) {
+      map.setStyle(buildTiandituStyle(basemap, getTiandituToken()));
       // 通知 LayerRenderer style 变化，需要重新添加图层
       window.dispatchEvent(new Event('maplibre:style-changed'));
     }

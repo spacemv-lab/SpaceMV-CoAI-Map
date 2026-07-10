@@ -29,7 +29,7 @@ export type RuntimePath = 'BROWSE' | 'SHOWCASE' | 'EDIT';
 export type DataResidency = 'metadata-only' | 'full';
 
 export interface LayerRoutingMetadata {
-  datasetId: string;
+  datasetId?: string;
   geometryType?: GeometryType;
   bbox?: [number, number, number, number] | null;
   fileSize?: number;
@@ -111,6 +111,8 @@ export type AttributeFieldType =
   | 'number'
   | 'boolean'
   | 'date'
+  | 'image'
+  | 'url'
   | 'unknown';
 
 export interface LayerFieldDefinition {
@@ -297,6 +299,10 @@ export type MapStateSchema = {
     featureId: string | null;
   };
   viewerReady: boolean;
+  /** 天地图 token(运行时由 /tile-sources/tianditu-token 拉取;空串=未取到/失败) */
+  tiandituToken: string;
+  /** token 是否已加载完成(成功或失败均置 true);地图据此 gate 初始化 */
+  tiandituTokenReady: boolean;
   legendVisible: boolean;
   /** 属性表拖拽中：map-area 据此在拖拽时关闭图例的过渡，使其跟手不缓动 */
   isPanelResizing: boolean;

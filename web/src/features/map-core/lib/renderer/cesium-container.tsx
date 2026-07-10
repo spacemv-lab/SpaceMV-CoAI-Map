@@ -6,15 +6,12 @@
 import * as Cesium from 'cesium';
 import { useEffect, useRef, useState } from 'react';
 import { useMapStore } from '../store/use-map-store';
-import { CESIUM_ION, TIANDITU_TOKEN } from '../constants/map-token';
+import { getTiandituToken } from '../constants/map-token';
 import { LayerRenderer } from './layer-renderer';
 import { DrawRenderer } from './draw-renderer';
 import { InteractionManager } from './interaction-manager';
 import { PopupContainer } from '../components/popup-container';
 import { startPerformanceSpan } from '../monitoring/performance-monitor';
-
-// Set Cesium token if needed, or rely on default/ion
-Cesium.Ion.defaultAccessToken = CESIUM_ION;
 
 export function CesiumContainer() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -126,19 +123,10 @@ export function CesiumContainer() {
       }
 
       try {
-        if (basemap === 'cesium-default') {
-          const imageryProvider = await Cesium.createWorldImageryAsync();
-          viewer.imageryLayers.addImageryProvider(imageryProvider);
-        } else if (basemap === 'arcgis-imagery') {
-          const arcgisProvider =
-            await Cesium.ArcGisMapServerImageryProvider.fromUrl(
-              'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer',
-            );
-          viewer.imageryLayers.addImageryProvider(arcgisProvider);
-        } else if (basemap === 'tianditu-vec') {
+        if (basemap === 'tianditu-vec') {
           // Tianditu Vector Base Layer
           const vecProvider = new Cesium.WebMapTileServiceImageryProvider({
-            url: `https://t1.tianditu.gov.cn/vec_w/wmts?service=wmts&request=GetTile&version=1.0.0&LAYER=vec&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}&style=default&format=tiles&tk=${TIANDITU_TOKEN}`,
+            url: `https://t1.tianditu.gov.cn/vec_w/wmts?service=wmts&request=GetTile&version=1.0.0&LAYER=vec&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}&style=default&format=tiles&tk=${getTiandituToken()}`,
             layer: 'vec',
             style: 'default',
             format: 'tiles',
@@ -149,7 +137,7 @@ export function CesiumContainer() {
 
           // Tianditu Annotation Layer (cva)
           const cvaProvider = new Cesium.WebMapTileServiceImageryProvider({
-            url: `https://t1.tianditu.gov.cn/cva_w/wmts?service=wmts&request=GetTile&version=1.0.0&LAYER=cva&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}&style=default&format=tiles&tk=${TIANDITU_TOKEN}`,
+            url: `https://t1.tianditu.gov.cn/cva_w/wmts?service=wmts&request=GetTile&version=1.0.0&LAYER=cva&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}&style=default&format=tiles&tk=${getTiandituToken()}`,
             layer: 'cva',
             style: 'default',
             format: 'tiles',
@@ -160,7 +148,7 @@ export function CesiumContainer() {
         } else if (basemap === 'tianditu-img') {
           // Tianditu Satellite Layer
           const imgProvider = new Cesium.WebMapTileServiceImageryProvider({
-            url: `https://t1.tianditu.gov.cn/img_w/wmts?service=wmts&request=GetTile&version=1.0.0&LAYER=img&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}&style=default&format=tiles&tk=${TIANDITU_TOKEN}`,
+            url: `https://t1.tianditu.gov.cn/img_w/wmts?service=wmts&request=GetTile&version=1.0.0&LAYER=img&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}&style=default&format=tiles&tk=${getTiandituToken()}`,
             layer: 'img',
             style: 'default',
             format: 'tiles',
@@ -171,7 +159,7 @@ export function CesiumContainer() {
 
           // Tianditu Satellite Annotation Layer (cia)
           const ciaProvider = new Cesium.WebMapTileServiceImageryProvider({
-            url: `https://t1.tianditu.gov.cn/cia_w/wmts?service=wmts&request=GetTile&version=1.0.0&LAYER=cia&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}&style=default&format=tiles&tk=${TIANDITU_TOKEN}`,
+            url: `https://t1.tianditu.gov.cn/cia_w/wmts?service=wmts&request=GetTile&version=1.0.0&LAYER=cia&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}&style=default&format=tiles&tk=${getTiandituToken()}`,
             layer: 'cia',
             style: 'default',
             format: 'tiles',
@@ -182,7 +170,7 @@ export function CesiumContainer() {
         } else if (basemap === 'tianditu-ter') {
           // Tianditu Terrain Layer
           const terProvider = new Cesium.WebMapTileServiceImageryProvider({
-            url: `https://t1.tianditu.gov.cn/ter_w/wmts?service=wmts&request=GetTile&version=1.0.0&LAYER=ter&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}&style=default&format=tiles&tk=${TIANDITU_TOKEN}`,
+            url: `https://t1.tianditu.gov.cn/ter_w/wmts?service=wmts&request=GetTile&version=1.0.0&LAYER=ter&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}&style=default&format=tiles&tk=${getTiandituToken()}`,
             layer: 'ter',
             style: 'default',
             format: 'tiles',
@@ -193,7 +181,7 @@ export function CesiumContainer() {
 
           // Tianditu Terrain Annotation Layer (cta)
           const ctaProvider = new Cesium.WebMapTileServiceImageryProvider({
-            url: `https://t1.tianditu.gov.cn/cta_w/wmts?service=wmts&request=GetTile&version=1.0.0&LAYER=cta&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}&style=default&format=tiles&tk=${TIANDITU_TOKEN}`,
+            url: `https://t1.tianditu.gov.cn/cta_w/wmts?service=wmts&request=GetTile&version=1.0.0&LAYER=cta&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}&style=default&format=tiles&tk=${getTiandituToken()}`,
             layer: 'cta',
             style: 'default',
             format: 'tiles',
@@ -204,7 +192,7 @@ export function CesiumContainer() {
         } else if (basemap === 'tianditu-ibo') {
           // Tianditu IBO (Global Map) Layer
           const iboProvider = new Cesium.WebMapTileServiceImageryProvider({
-            url: `https://t1.tianditu.gov.cn/ibo_w/wmts?service=wmts&request=GetTile&version=1.0.0&LAYER=ibo&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}&style=default&format=tiles&tk=${TIANDITU_TOKEN}`,
+            url: `https://t1.tianditu.gov.cn/ibo_w/wmts?service=wmts&request=GetTile&version=1.0.0&LAYER=ibo&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}&style=default&format=tiles&tk=${getTiandituToken()}`,
             layer: 'ibo',
             style: 'default',
             format: 'tiles',

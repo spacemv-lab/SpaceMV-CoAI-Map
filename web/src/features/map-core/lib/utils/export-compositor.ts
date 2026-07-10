@@ -7,6 +7,7 @@ import maplibregl from 'maplibre-gl';
 import { ExportConfig, ExportPanelState } from '../types/export-state';
 import { drawTitle, drawNorthArrow, drawScaleBar, drawLegend, drawTianditu, drawBrand, loadNorthArrowSvg, loadTiandituLogo } from './map-elements';
 import { useMapStore } from '../store/use-map-store';
+import { isDarkBasemap } from '../constants/tianditu-presets';
 
 /**
  * Compute meters per pixel at current zoom and latitude
@@ -74,6 +75,7 @@ export async function composeMapImage(
   const zoom = map.getZoom();
   const metersPerPixel = computeMetersPerPixel(zoom, center.lat);
   const layers = useMapStore.getState().layers.filter((l) => l.visible);
+  const basemap = useMapStore.getState().basemap;
 
   // Preload north arrow SVG if enabled
   let northArrowImage: HTMLImageElement | null = null;
@@ -100,7 +102,7 @@ export async function composeMapImage(
   drawNorthArrow(ctx, config.northArrow, exportWidth, exportHeight, bearing, northArrowImage);
   drawScaleBar(ctx, config.scaleBar, exportWidth, exportHeight, metersPerPixel);
   drawLegend(ctx, config.legend, exportWidth, exportHeight, layers);
-  drawTianditu(ctx, config.tianditu, exportWidth, exportHeight, tiandituLogoImage);
+  drawTianditu(ctx, config.tianditu, exportWidth, exportHeight, tiandituLogoImage, isDarkBasemap(basemap));
   drawBrand(ctx, config.brand, exportWidth, exportHeight);
 
   return { dataUrl: exportCanvas.toDataURL('image/png', 1.0), w: exportWidth, h: exportHeight };

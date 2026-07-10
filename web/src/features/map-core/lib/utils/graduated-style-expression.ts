@@ -16,19 +16,37 @@ import { getColorsForClasses } from '../constants/color-ramps';
  */
 type MapLibreExpression = unknown[];
 
+/** 无数据（缺字段 / null / 空串）的单独配色，不并入任何色阶 */
+export const NO_DATA_COLOR = '#cccccc';
+
 /**
- * 生成分级色彩的 interpolate 表达式
+ * 构造“无数据”判定条件：字段缺失、值为 null、或值为空串都算无数据。
+ * 非数字字符串（理论上不会出现在瓦片里）也会因不匹配任何分支落到 interpolate 报错回退，
+ * 与历史行为一致，这里不额外处理。
+ */
+function buildNoDataCondition(field: string): MapLibreExpression {
+  return [
+    'any',
+    ['!', ['has', field]],
+    ['==', ['get', field], null],
+    ['==', ['get', field], ''],
+  ];
+}
+
+/**
+ * 生成分级色彩的 case 表达式
  * 用于 circle-color, fill-color, line-color 等 paint property
  *
- * 表达式格式：
+ * 结构：
  * [
- *   'interpolate',
- *   ['linear'],           // 插值方法
- *   ['get', 'fieldName'], // 属性访问表达式
- *   breakpoint1, color1,  // 断点-颜色对
- *   breakpoint2, color2,
- *   ...
+ *   'case',
+ *   <无数据条件>, NO_DATA_COLOR,                  // 缺字段/null/"" → 灰
+ *   ['interpolate', ['linear'], ['get', field],   // 数字值 → 色阶插值
+ *     断点1, 色1, 断点2, 色2, ...],
  * ]
+ *
+ * 旧实现用 coalesce(get,0) 把空值兜底成 0 → 落到最小色阶，会把“无数据”误读成
+ * “最低值”。改成 case 后无数据要素单独灰色，区分清楚。
  */
 export function generateGraduatedColorExpression(
   config: GraduatedConfig,
@@ -44,46 +62,32 @@ export function generateGraduatedColorExpression(
     return null;
   }
 
-  // 构建 interpolate 表达式
-  // 新增字段对存量要素默认为 null；interpolate 直接吃 ['get', field] 遇到 null 会抛
-  // "Expected value to be of type number, but found null"，且报错的要素会被 MapLibre 当
-  // 越界值处理而回退成最大色（看起来"全是最大值颜色"）。用 coalesce 把 null 兜底为 0，
-  // 落到最小色，点/线/面通用。
-  const expression: MapLibreExpression = [
-    'interpolate',
-    ['linear'],
-    ['coalesce', ['get', config.field], 0],
-  ];
-
   // 确保断点严格升序且去重
   const sortedBreakpoints = [...config.breakpoints].sort((a, b) => a - b);
-  const uniqueBreakpoints = sortedBreakpoints.filter(
+  const breakpoints = sortedBreakpoints.filter(
     (bp, i) => i === 0 || bp > sortedBreakpoints[i - 1],
   );
 
-  // 添加断点-颜色对
-  // interpolate 需要至少两个断点-颜色对
-  const breakpoints = uniqueBreakpoints;
+  // 构建 interpolate（仅作用于有数值的要素）
+  const interpolate: MapLibreExpression = [
+    'interpolate',
+    ['linear'],
+    ['get', config.field],
+  ];
 
-  // 确保 colors 数量与断点区间匹配
   // classes = 5 时，有 5 个颜色，6 个断点（min, b1, b2, b3, b4, max）
   for (let i = 0; i < Math.min(colors.length, breakpoints.length - 1); i++) {
-    // 每个区间的颜色应用于该区间起点
-    // 例如：值 < breakpoints[1] 显示 colors[0]
-    //       值 < breakpoints[2] 显示 colors[1]（插值过渡）
-    expression.push(breakpoints[i], colors[i]);
+    interpolate.push(breakpoints[i], colors[i]);
   }
-
-  // 添加最后一个断点和颜色（最大值）
   const lastIndex = Math.min(colors.length - 1, breakpoints.length - 1);
-  expression.push(breakpoints[breakpoints.length - 1], colors[lastIndex]);
+  interpolate.push(breakpoints[breakpoints.length - 1], colors[lastIndex]);
 
-  return expression;
+  return ['case', buildNoDataCondition(config.field), NO_DATA_COLOR, interpolate];
 }
 
 /**
- * 生成分级大小的 interpolate 表达式
- * 用于 circle-radius（点大小按数值变化）
+ * 生成分级大小的 case 表达式
+ * 用于 circle-radius（点大小按数值变化）。无数据 → 最小尺寸（灰色、不抢眼）。
  */
 export function generateGraduatedSizeExpression(
   config: GraduatedConfig,
@@ -98,13 +102,11 @@ export function generateGraduatedSizeExpression(
   const min = breakpoints[0];
   const max = breakpoints[breakpoints.length - 1];
 
-  // 线性映射：field 值 → size（同色阶表达式，null 兜底为 0 避免报错/越界）
   return [
-    'interpolate',
-    ['linear'],
-    ['coalesce', ['get', config.field], 0],
-    min, minSize,
-    max, maxSize,
+    'case',
+    buildNoDataCondition(config.field),
+    minSize,
+    ['interpolate', ['linear'], ['get', config.field], min, minSize, max, maxSize],
   ];
 }
 

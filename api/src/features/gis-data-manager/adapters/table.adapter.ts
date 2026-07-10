@@ -30,6 +30,8 @@ export class TableAdapter extends BaseAdapter {
       latitudeColumn?: string;
       longitudeColumn?: string;
       wktColumn?: string;
+      headerRow?: number; // 1-based，默认 1（首行为表头）
+      sheet?: string; // Excel 工作表名
     }
   ): Promise<ParseResult> {
     let filePath: string;
@@ -62,11 +64,11 @@ export class TableAdapter extends BaseAdapter {
       let fields: { name: string; type: string }[] = [];
 
       if (ext === 'csv') {
-        const result = await this.parseCSV(filePath);
+        const result = await this.parseCSV(filePath, options);
         records = result.records;
         fields = result.fields;
       } else if (ext === 'xls' || ext === 'xlsx') {
-        const result = await this.parseExcel(filePath);
+        const result = await this.parseExcel(filePath, options);
         records = result.records;
         fields = result.fields;
       } else {
@@ -128,11 +130,14 @@ export class TableAdapter extends BaseAdapter {
         geometryType = this.normalizeGeometryType(firstWithGeometry.geometry.type);
       }
 
+      const bbox = this.computeBbox(features);
+
       return {
         features,
         geometryType,
         recordCount: features.length,
         fields,
+        bbox,
       };
     } finally {
       // Cleanup temp file if we created one or downloaded from MinIO
@@ -155,7 +160,10 @@ export class TableAdapter extends BaseAdapter {
     };
   }
 
-  private async parseCSV(filePath: string): Promise<{ records: Record<string, any>[]; fields: { name: string; type: string }[] }> {
+  private async parseCSV(
+    filePath: string,
+    options?: { headerRow?: number },
+  ): Promise<{ records: Record<string, any>[]; fields: { name: string; type: string }[] }> {
     if (!Papa) {
       Papa = await import('papaparse');
     }
@@ -186,35 +194,72 @@ export class TableAdapter extends BaseAdapter {
       }
     }
 
+    // headerRow: 1-based，默认 1（首行为表头）。指定 N 时跳过前 N-1 行、第 N 行作表头。
+    const headerRow = options?.headerRow && options.headerRow > 0 ? options.headerRow : 1;
+    const headerIndex = headerRow - 1;
+
     return new Promise((resolve, reject) => {
       Papa.parse(content, {
-        header: true,
+        header: false, // 关闭自动表头，手动按 headerRow 取表头行（支持"第 N 行才是表头"）
         skipEmptyLines: true,
         dynamicTyping: true,
         complete: (results: any) => {
-          const fields = (results.meta.fields || []).map((name: string) => ({
-            name,
+          const rows: any[][] = results.data;
+          if (rows.length <= headerIndex) {
+            resolve({ records: [], fields: [] });
+            return;
+          }
+          const headerFields = (rows[headerIndex] as any[]).map((cell) =>
+            String(cell ?? '').trim(),
+          );
+          const dataRows = rows.slice(headerIndex + 1);
+
+          // zip 每行成对象，键来自表头行；空名/重名列加序号避免覆盖
+          const records: Record<string, any>[] = dataRows.map((row) => {
+            const obj: Record<string, any> = {};
+            row.forEach((cell, i) => {
+              const raw = headerFields[i] ?? '';
+              const name = raw === '' ? `_col${i}` : raw;
+              if (name in obj) {
+                obj[`${name}_${i}`] = cell;
+              } else {
+                obj[name] = cell;
+              }
+            });
+            return obj;
+          });
+
+          const fields = headerFields.map((name, i) => ({
+            name: name || `_col${i}`,
             type: 'string',
           }));
 
-          resolve({
-            records: results.data,
-            fields,
-          });
+          resolve({ records, fields });
         },
         error: reject,
       });
     });
   }
 
-  private async parseExcel(filePath: string): Promise<{ records: Record<string, any>[]; fields: { name: string; type: string }[] }> {
+  private async parseExcel(
+    filePath: string,
+    options?: { sheet?: string; headerRow?: number },
+  ): Promise<{ records: Record<string, any>[]; fields: { name: string; type: string }[] }> {
     if (!XLSX) {
       XLSX = await import('xlsx');
     }
 
     const workbook = XLSX.readFile(filePath);
-    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json(firstSheet);
+    // 选 sheet：未指定或名字不存在时回退第一个 sheet
+    const sheetName =
+      options?.sheet && workbook.SheetNames.includes(options.sheet)
+        ? options.sheet
+        : workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+
+    // headerRow: 1-based，默认 1。range 指定起始行(0-based)，sheet_to_json 把该行当表头。
+    const headerRow = options?.headerRow && options.headerRow > 0 ? options.headerRow : 1;
+    const data = XLSX.utils.sheet_to_json(sheet, { range: headerRow - 1 });
 
     const fields: { name: string; type: string }[] = [];
     if (data.length > 0) {
@@ -314,5 +359,43 @@ export class TableAdapter extends BaseAdapter {
       'MULTIPOLYGON': 'MULTI_POLYGON',
     };
     return typeMap[normalized] || 'UNKNOWN';
+  }
+
+  /** 遍历所有要素坐标算 bbox[minLon,minLat,maxLon,maxLat]，供"缩放至图层"用 */
+  private computeBbox(features: ParsedFeature[]): [number, number, number, number] | undefined {
+    let minLon = Infinity;
+    let minLat = Infinity;
+    let maxLon = -Infinity;
+    let maxLat = -Infinity;
+    let has = false;
+    const visit = (coords: any) => {
+      if (!Array.isArray(coords)) return;
+      if (
+        coords.length >= 2 &&
+        typeof coords[0] === 'number' &&
+        typeof coords[1] === 'number'
+      ) {
+        const lon = coords[0];
+        const lat = coords[1];
+        if (
+          !Number.isNaN(lon) &&
+          !Number.isNaN(lat) &&
+          Math.abs(lon) <= 180 &&
+          Math.abs(lat) <= 90
+        ) {
+          if (lon < minLon) minLon = lon;
+          if (lon > maxLon) maxLon = lon;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
+          has = true;
+        }
+        return;
+      }
+      for (const c of coords) visit(c);
+    };
+    for (const f of features) {
+      if (f.geometry?.coordinates) visit(f.geometry.coordinates);
+    }
+    return has ? [minLon, minLat, maxLon, maxLat] : undefined;
   }
 }

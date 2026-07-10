@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   generateGraduatedColorExpression,
   generateGraduatedSizeExpression,
+  NO_DATA_COLOR,
 } from './graduated-style-expression';
 import { GraduatedConfig } from '../types/graduated-style';
 
@@ -20,14 +21,21 @@ const config = (overrides: Partial<GraduatedConfig> = {}): GraduatedConfig => ({
 });
 
 describe('generateGraduatedColorExpression', () => {
-  it('wraps the field accessor in coalesce(null) so null properties do not throw', () => {
-    // 回归：['get', field] 遇 null 会抛 "Expected number, found null"，并使要素回退最大色。
-    // 必须用 coalesce 兜底为 0。
+  it('routes no-data (missing/null/"") to a gray color, valid numbers to interpolate', () => {
+    // 回归：空值不能再被 coalesce 兜底成 0（会把“无数据”误读成“最低值”）。
+    // 现在用 case：无数据条件 → 灰；其余 → interpolate(get(field))。
     const expr = generateGraduatedColorExpression(config()) as unknown[];
 
-    // ['interpolate', ['linear'], <input>, ...stops]
-    const input = expr[2];
-    expect(input).toEqual(['coalesce', ['get', 'value'], 0]);
+    expect(expr[0]).toBe('case');
+    // 无数据分支输出灰色
+    expect(expr).toContain(NO_DATA_COLOR);
+    // default（最后一项）是 interpolate，且直接吃 ['get', field]（不再 coalesce）
+    const def = expr[expr.length - 1] as unknown[];
+    expect(def[0]).toBe('interpolate');
+    expect(def[2]).toEqual(['get', 'value']);
+    // 无数据判定含「缺字段 / null / 空串」三种
+    const cond = expr[1] as unknown[];
+    expect(cond[0]).toBe('any');
   });
 
   it('returns null when breakpoints are missing or too few', () => {
@@ -38,9 +46,13 @@ describe('generateGraduatedColorExpression', () => {
 });
 
 describe('generateGraduatedSizeExpression', () => {
-  it('wraps the field accessor in coalesce(null) too', () => {
-    const expr = generateGraduatedSizeExpression(config()) as unknown[];
-    const input = expr[2];
-    expect(input).toEqual(['coalesce', ['get', 'value'], 0]);
+  it('routes no-data to minSize, valid numbers to interpolate', () => {
+    const expr = generateGraduatedSizeExpression(config(), 4, 20) as unknown[];
+    expect(expr[0]).toBe('case');
+    // 无数据分支取最小尺寸
+    expect(expr[2]).toBe(4);
+    // default 是 interpolate
+    const def = expr[expr.length - 1] as unknown[];
+    expect(def[0]).toBe('interpolate');
   });
 });

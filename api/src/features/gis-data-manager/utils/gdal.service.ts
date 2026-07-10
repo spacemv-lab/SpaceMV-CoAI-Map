@@ -33,7 +33,15 @@ export interface GdalVersion {
   releaseDate: string;
 }
 
-type GdalBackend = 'local' | 'docker' | 'wsl-docker' | 'none';
+/**
+ * GDAL 后端类型。api 镜像(map-ai-api.Dockerfile)已 `apt install gdal-bin`,
+ * 容器内自带 ogr2ogr/ogrinfo/gdal_translate,统一走 local。
+ *
+ * 历史:曾有 'docker'/'wsl-docker'(api 派生 WSL docker 容器跑 GDAL),但 api
+ * 永远跑在自带 GDAL 的镜像里、且容器内无 docker socket / wsl.exe,那条路径从未
+ * 生效——为消除歧义已移除,仅保留 local。
+ */
+export type GdalBackend = 'local' | 'none';
 
 interface CommandResult {
   code: number;
@@ -41,13 +49,8 @@ interface CommandResult {
   stderr: string;
 }
 
-interface DockerMount {
-  hostPath: string;
-  containerPath: string;
-}
-
 /**
- * GDAL service for ogr2ogr operations
+ * GDAL service for ogr2ogr / ogrinfo operations (容器内本地 CLI)
  */
 @Injectable()
 export class GdalService {
@@ -56,21 +59,6 @@ export class GdalService {
   private versionInfo?: GdalVersion;
   private initPromise?: Promise<boolean>;
   private backend: GdalBackend = 'none';
-  private readonly mode =
-    (process.env.GDAL_MODE || 'auto').trim().toLowerCase();
-  private readonly dockerImage =
-    process.env.GDAL_DOCKER_IMAGE?.trim() ||
-    'osgeo/gdal:ubuntu-small-latest';
-  private readonly dockerUseWsl =
-    process.env.GDAL_DOCKER_USE_WSL === 'true';
-  private readonly wslDistro =
-    process.env.GDAL_WSL_DISTRO?.trim() || 'Ubuntu';
-  private readonly wslUser =
-    process.env.GDAL_WSL_USER?.trim() || '';
-  private readonly localOgr2ogrPath =
-    process.env.GDAL_OGR2OGR_PATH?.trim() || '';
-  private readonly localOgrinfoPath =
-    process.env.GDAL_OGRINFO_PATH?.trim() || '';
   private readonly commandTimeoutMs = Number(
     process.env.GDAL_COMMAND_TIMEOUT_MS || 120000,
   );
@@ -151,57 +139,28 @@ export class GdalService {
   }
 
   /**
-   * Check if GDAL is available
+   * Check if GDAL is available (容器内本地 ogr2ogr 须在 PATH)
    */
   private async checkAvailability(): Promise<boolean> {
     if (this.available !== null) {
       return this.available;
     }
 
-    if (this.mode === 'local') {
-      const localVersion = await this.detectLocalGdal();
-      if (localVersion) {
-        this.backend = 'local';
-        this.available = true;
-        this.versionInfo = localVersion;
-        this.logger.log(
-          `GDAL available locally: ${localVersion.version} (${localVersion.releaseDate})`,
-        );
-        return true;
-      }
-
-      this.backend = 'none';
-      this.available = false;
-      this.logger.warn(
-        'GDAL local mode requires GDAL_OGR2OGR_PATH and GDAL_OGRINFO_PATH to be configured',
+    const localVersion = await this.detectLocalGdal();
+    if (localVersion) {
+      this.backend = 'local';
+      this.available = true;
+      this.versionInfo = localVersion;
+      this.logger.log(
+        `GDAL available locally: ${localVersion.version} (${localVersion.releaseDate})`,
       );
-      return false;
-    }
-
-    if (this.mode === 'docker') {
-      const dockerVersion = await this.detectDockerGdal();
-      if (dockerVersion) {
-        this.backend = this.dockerUseWsl ? 'wsl-docker' : 'docker';
-        this.available = true;
-        this.versionInfo = dockerVersion;
-        this.logger.log(
-          `GDAL available via ${this.dockerUseWsl ? 'WSL Docker' : 'Docker'} image ${this.dockerImage}: ${dockerVersion.version} (${dockerVersion.releaseDate})`,
-        );
-        return true;
-      }
-
-      this.backend = 'none';
-      this.available = false;
-      this.logger.warn(
-        'GDAL docker mode is configured but the Docker image is not available',
-      );
-      return false;
+      return true;
     }
 
     this.backend = 'none';
     this.available = false;
     this.logger.warn(
-      `Unsupported GDAL_MODE "${this.mode}". Use "docker" or "local".`,
+      'GDAL not available: ogr2ogr not found in PATH (api 镜像须 apt install gdal-bin)',
     );
     return false;
   }
@@ -251,12 +210,7 @@ export class GdalService {
     }
 
     try {
-      let result: CommandResult;
-      if (this.backend === 'docker' || this.backend === 'wsl-docker') {
-        result = await this.runDockerTool('ogr2ogr', args, []);
-      } else {
-        result = await this.runCommand(this.localOgr2ogrPath, args);
-      }
+      const result = await this.runCommand('ogr2ogr', args);
 
       if (result.code !== 0) {
         this.logger.error(`ogr2ogr failed: ${result.stderr || result.stdout}`);
@@ -276,6 +230,79 @@ export class GdalService {
         success: false,
         error: error.message || 'Unknown error',
       };
+    }
+  }
+
+  /**
+   * 把栅格(GeoTIFF)转成 COG(Cloud Optimized GeoTIFF),重投影到 EPSG:3857。
+   *
+   * 两步(本镜像的 gdal_translate 不支持 -t_srs,重投影必须走 gdalwarp):
+   *   1) gdalwarp -t_srs EPSG:3857  input → reproj(临时)
+   *   2) gdal_translate -of COG      reproj → output(保留原始波段 + 位深,COG 自动瓦片化 + 金字塔)
+   * 真彩色 / 波段选择 / 拉伸交给 TiTiler 出瓦片时的 bidx + rescale(processCog 算 rescale)。
+   * reproj 临时文件由本方法内部创建/清理,调用方只感知 input/output。
+   */
+  async translateToCog(
+    inputPath: string,
+    outputPath: string,
+    options?: { targetCRS?: string; compress?: string },
+  ): Promise<GdalResult> {
+    await this.ensureInitialized();
+
+    if (!this.available) {
+      return {
+        success: false,
+        error: 'GDAL not available',
+      };
+    }
+
+    const targetCRS = options?.targetCRS ?? 'EPSG:3857';
+    const compress = options?.compress ?? 'DEFLATE';
+    const reprojPath = await this.createTempFile('.reproj.tif', 'cog-');
+
+    try {
+      // 1) gdalwarp 重投影
+      const warp = await this.runCommand('gdalwarp', [
+        '-t_srs', targetCRS,
+        inputPath,
+        reprojPath,
+      ], 1800000); // 大 tif 重投影放宽到 30 分钟(默认 GDAL_COMMAND_TIMEOUT_MS=2 分钟不够)
+      if (warp.code !== 0) {
+        this.logger.error(`gdalwarp failed: ${warp.stderr || warp.stdout}`);
+        return {
+          success: false,
+          error: `gdalwarp: ${warp.stderr || warp.stdout || 'failed'}`,
+        };
+      }
+
+      // 2) gdal_translate 转 COG(保留原始波段+位深;真彩色/波段/拉伸交给 TiTiler bidx+rescale)
+      const cog = await this.runCommand('gdal_translate', [
+        '-of', 'COG',
+        '-co', `COMPRESS=${compress}`,
+        '-co', 'BIGTIFF=IF_SAFER',
+        reprojPath,
+        outputPath,
+      ], 1800000); // COG 转码(建金字塔)同样放宽
+      if (cog.code !== 0) {
+        this.logger.error(`gdal_translate COG failed: ${cog.stderr || cog.stdout}`);
+        return {
+          success: false,
+          error: `gdal_translate: ${cog.stderr || cog.stdout || 'failed'}`,
+        };
+      }
+
+      return {
+        success: true,
+        output: cog.stdout,
+      };
+    } catch (error: any) {
+      this.logger.error(`translateToCog failed: ${error.message}`);
+      return {
+        success: false,
+        error: error.message || 'Unknown error',
+      };
+    } finally {
+      await this.cleanup(reprojPath).catch(() => {});
     }
   }
 
@@ -315,11 +342,7 @@ export class GdalService {
     const args: string[] = [];
 
     // Target coordinate reference system
-    if (options?.targetCRS) {
-      args.push('-t_srs', options.targetCRS);
-    } else {
-      args.push('-t_srs', 'EPSG:4326');
-    }
+    args.push('-t_srs', options?.targetCRS ?? 'EPSG:4326');
 
     // Output format
     args.push('-f', 'GeoJSON');
@@ -328,32 +351,8 @@ export class GdalService {
     const output = outputPath || (await this.createTempFile('.geojson'));
 
     // Input file - support virtual paths
-    // Only use /vsizip/ for zip files, otherwise use the path directly
     let input: string;
     const outputResolved = path.resolve(output);
-
-    if (this.backend === 'docker' || this.backend === 'wsl-docker') {
-      const dockerPaths = this.buildDockerPathContext([
-        path.resolve(inputPath),
-        outputResolved,
-      ]);
-      const containerInputPath = dockerPaths.toContainerPath(path.resolve(inputPath));
-      input = inputPath.toLowerCase().endsWith('.zip')
-        ? this.createVirtualPath(containerInputPath, 'zip')
-        : containerInputPath;
-      args.push(dockerPaths.toContainerPath(outputResolved));
-      args.push(input);
-
-      if (options?.layerName) {
-        args.push('-nln', options.layerName);
-      }
-
-      if (options?.encoding) {
-        args.push('-oo', `ENCODING=${options.encoding}`);
-      }
-
-      return this.executeDockerOgr2ogr(args, dockerPaths.mounts);
-    }
 
     if (inputPath.startsWith('/vsi')) {
       input = inputPath;
@@ -390,35 +389,15 @@ export class GdalService {
     }
 
     try {
-      let output: string;
-      if (this.backend === 'docker' || this.backend === 'wsl-docker') {
-        const dockerPaths = this.buildDockerPathContext([path.resolve(filePath)]);
-        const containerInputPath = dockerPaths.toContainerPath(path.resolve(filePath));
-        const input = filePath.toLowerCase().endsWith('.zip')
-          ? this.createVirtualPath(containerInputPath)
-          : containerInputPath;
-        const result = await this.runDockerTool(
-          'ogrinfo',
-          ['-so', '-al', input],
-          dockerPaths.mounts,
-        );
-        if (result.code !== 0) {
-          throw new Error(result.stderr || result.stdout || 'ogrinfo failed');
-        }
-        output = result.stdout;
-      } else {
-        const input = filePath.toLowerCase().endsWith('.zip')
-          ? this.createVirtualPath(filePath)
-          : path.resolve(filePath);
-        const result = await this.runCommand(this.localOgrinfoPath, ['-so', '-al', input]);
-        if (result.code !== 0) {
-          throw new Error(result.stderr || result.stdout || 'ogrinfo failed');
-        }
-        output = result.stdout;
+      const input = filePath.toLowerCase().endsWith('.zip')
+        ? this.createVirtualPath(filePath)
+        : path.resolve(filePath);
+      const result = await this.runCommand('ogrinfo', ['-so', '-al', input]);
+      if (result.code !== 0) {
+        throw new Error(result.stderr || result.stdout || 'ogrinfo failed');
       }
-
       // Parse ogrinfo output
-      return this.parseOgrinfoOutput(output);
+      return this.parseOgrinfoOutput(result.stdout);
     } catch (error: any) {
       this.logger.warn(`ogrinfo failed: ${error.message}`);
       return null;
@@ -498,33 +477,8 @@ export class GdalService {
   }
 
   private async detectLocalGdal(): Promise<GdalVersion | null> {
-    if (!this.localOgr2ogrPath || !this.localOgrinfoPath) {
-      return null;
-    }
-
     try {
-      const result = await this.runCommand(
-        this.localOgr2ogrPath,
-        ['--version'],
-        10000,
-      );
-      if (result.code !== 0) {
-        return null;
-      }
-      return this.parseVersionInfo(result.stdout.trim());
-    } catch {
-      return null;
-    }
-  }
-
-  private async detectDockerGdal(): Promise<GdalVersion | null> {
-    try {
-      const result = await this.runDockerTool(
-        'ogr2ogr',
-        ['--version'],
-        [],
-        30000,
-      );
+      const result = await this.runCommand('ogr2ogr', ['--version'], 10000);
       if (result.code !== 0) {
         return null;
       }
@@ -544,118 +498,6 @@ export class GdalService {
       version: match[1],
       releaseDate: match[2],
     };
-  }
-
-  private async executeDockerOgr2ogr(
-    args: string[],
-    mounts: DockerMount[],
-  ): Promise<GdalResult> {
-    try {
-      const result = await this.runDockerTool(
-        'ogr2ogr',
-        args,
-        mounts,
-      );
-
-      if (result.code !== 0) {
-        this.logger.error(`ogr2ogr failed: ${result.stderr || result.stdout}`);
-        return {
-          success: false,
-          error: result.stderr || result.stdout || 'Unknown error',
-        };
-      }
-
-      return {
-        success: true,
-        output: result.stdout,
-      };
-    } catch (error: any) {
-      this.logger.error(`ogr2ogr failed: ${error.message}`);
-      return {
-        success: false,
-        error: error.message || 'Unknown error',
-      };
-    }
-  }
-
-  private buildDockerPathContext(filePaths: string[]): {
-    mounts: DockerMount[];
-    toContainerPath: (hostPath: string) => string;
-  } {
-    const dirMap = new Map<string, string>();
-    const mounts: DockerMount[] = [];
-
-    for (const filePath of filePaths) {
-      const resolved = path.resolve(filePath);
-      const hostDir = path.dirname(resolved);
-      if (dirMap.has(hostDir)) {
-        continue;
-      }
-
-      const containerPath = `/gdal/vol${mounts.length}`;
-      dirMap.set(hostDir, containerPath);
-      mounts.push({
-        hostPath: hostDir,
-        containerPath,
-      });
-    }
-
-    return {
-      mounts,
-      toContainerPath: (hostPath: string) => {
-        const resolved = path.resolve(hostPath);
-        const hostDir = path.dirname(resolved);
-        const containerDir = dirMap.get(hostDir);
-        if (!containerDir) {
-          throw new Error(`No Docker mount found for ${resolved}`);
-        }
-        return path.posix.join(
-          containerDir,
-          path.basename(resolved).replace(/\\/g, '/'),
-        );
-      },
-    };
-  }
-
-  private async runDockerTool(
-    tool: 'ogr2ogr' | 'ogrinfo',
-    toolArgs: string[],
-    mounts: DockerMount[],
-    timeoutMs = this.commandTimeoutMs,
-  ): Promise<CommandResult> {
-    const dockerArgs = ['run', '--rm'];
-    for (const mount of mounts) {
-      const hostPath = this.dockerUseWsl
-        ? this.convertWindowsPathToWsl(mount.hostPath)
-        : mount.hostPath;
-      dockerArgs.push('-v', `${hostPath}:${mount.containerPath}`);
-    }
-    dockerArgs.push('--entrypoint', tool, this.dockerImage, ...toolArgs);
-
-    if (this.dockerUseWsl) {
-      const wslArgs = ['-d', this.wslDistro];
-      if (this.wslUser) {
-        wslArgs.push('-u', this.wslUser);
-      }
-      wslArgs.push('--', 'docker', ...dockerArgs);
-      return this.runCommand('wsl.exe', wslArgs, timeoutMs);
-    }
-
-    return this.runCommand('docker', dockerArgs, timeoutMs);
-  }
-
-  private convertWindowsPathToWsl(inputPath: string): string {
-    if (!/^[a-zA-Z]:\\/.test(inputPath)) {
-      return inputPath.replace(/\\/g, '/');
-    }
-
-    const drive = inputPath[0].toLowerCase();
-    const normalizedPath = inputPath
-      .slice(2)
-      .replace(/\\/g, '/')
-      .replace(/^\/+/, '');
-
-    return `/mnt/${drive}/${normalizedPath}`;
   }
 
   private runCommand(

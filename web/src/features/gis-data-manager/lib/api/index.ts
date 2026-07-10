@@ -7,3 +7,5 @@ export { datasetApi } from './dataset.api';
 export { externalApi } from './external.api';
 export { statsApi } from './stats.api';
 export { mappingApi } from './mapping.api';
+export { tileSourceApi } from './tile-source.api';
+export type { CogSource, TiandituCredential } from './tile-source.api';

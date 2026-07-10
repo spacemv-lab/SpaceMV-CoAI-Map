@@ -13,6 +13,8 @@ const FIELD_TYPES: AttributeFieldType[] = [
   'number',
   'boolean',
   'date',
+  'image',
+  'url',
   'unknown',
 ];
 

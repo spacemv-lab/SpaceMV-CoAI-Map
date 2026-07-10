@@ -64,18 +64,33 @@ services:
         aliases:
           - minio
 
-  gdal-tools:
-    build:
-      context: ../..
-      dockerfile: docker/gdal-tools.Dockerfile
-    image: txwx-gdal-tools:dev
-    container_name: txwx-gdal-tools
+  # TiTiler —— 动态栅格瓦片服务(读 MinIO 里的 COG,出 XYZ 瓦片供浏览器直连)
+  titiler:
+    image: ghcr.io/developmentseed/titiler:latest
+    container_name: txwx-titiler
     restart: always
-    command: ['sleep', 'infinity']
+    env_file:
+      - ../../.envs/map-ai/dev/docker.env
+    environment:
+      # MinIO S3(GDAL/rasterio 读栅格);凭证 AWS_ACCESS_KEY_ID/SECRET 由 docker.env 提供(= MinIO root)
+      - AWS_ENDPOINT_URL=http://minio:9000
+      - AWS_S3_ENDPOINT=minio:9000
+      - AWS_VIRTUAL_HOSTING=FALSE
+      - AWS_HTTPS=FALSE
+      - AWS_REGION=us-east-1
+      # 浏览器来源(MapLibre 直连取瓦片)
+      - TITILER_API_CORS_ORIGINS=http://localhost:4200,http://127.0.0.1:4200
+      # 关闭 /vsis3 目录缓存:否则每上传一个新 COG,TiTiler 都得重启才能读到(缓存了旧目录列表)
+      - GDAL_DISABLE_READDIR_ON_OPEN=YES
+      - CPL_VSIL_CURL_CACHEDIR_EXPIRATION=0
+    ports:
+      - '127.0.0.1:8002:80'
+    depends_on:
+      - minio
     networks:
       default:
         aliases:
-          - gdal-tools
+          - titiler
 
 networks:
   default:

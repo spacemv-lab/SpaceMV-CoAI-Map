@@ -15,6 +15,13 @@ export interface UploadOptions {
   repairGeometry?: boolean;
   mappingProfileId?: string;
   encoding?: string;
+  // 表格列指认（csv/xls/xlsx），透传到 TableAdapter.parse
+  headerRow?: number;
+  sheet?: string;
+  latitudeColumn?: string;
+  longitudeColumn?: string;
+  geometryColumn?: string;
+  wktColumn?: string;
 }
 
 /**
